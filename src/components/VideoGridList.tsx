@@ -303,10 +303,10 @@ export default function VideoGridList({
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.listContent}
-        initialNumToRender={8}
-        maxToRenderPerBatch={8}
-        windowSize={7}
-        removeClippedSubviews={!IS_WEB}
+        // initialNumToRender={8}
+        // maxToRenderPerBatch={8}
+        // windowSize={7}
+        // removeClippedSubviews={!IS_WEB}
       />
     );
   }
