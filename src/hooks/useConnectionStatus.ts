@@ -1,18 +1,19 @@
 import { useState, useEffect } from "react";
 import NetInfo, { type NetInfoState } from "@react-native-community/netinfo";
 
-const OFFLINE_CONFIRMATION_DELAY_MS = 3000;
+const OFFLINE_CONFIRMATION_DELAY_MS = 1500;
 
 export type ConnectionStatus = "unknown" | "online" | "offline";
 
 function getConnectionStatus(networkState: NetInfoState): ConnectionStatus {
-  if (
-    networkState.isConnected === false ||
-    networkState.isInternetReachable === false
-  ) {
+  if (networkState.isConnected === false) {
     return "offline";
   }
 
+  // `isInternetReachable` can be a false positive on app foreground changes,
+  // web deploys with base paths, captive portals, VPNs, and blocked probe URLs.
+  // For the global offline toast we only trust the OS/browser connection flag.
+  // Real API failures should be handled by their request-level retry/error UI.
   if (networkState.isConnected === true) {
     return "online";
   }

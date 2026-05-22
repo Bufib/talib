@@ -35,6 +35,9 @@ type Props = VideoGridCardType;
 
 const IS_WEB = Platform.OS === "web";
 const PLAYER_ASPECT_RATIO = 9 / 16;
+const CARD_RADIUS = 18;
+const WEB_CARD_RADIUS = 18;
+const STATUS_BUTTON_RADIUS = 14;
 
 function firstYoutubeTime(...values: (string | number | null | undefined)[]) {
   for (const value of values) {
@@ -244,11 +247,7 @@ export default function VideoGridCard({
           IS_WEB && styles.webCard,
           IS_WEB && webTransition("border-color", 200, "ease"),
           { backgroundColor: colors.contrast },
-          IS_WEB && {
-            borderColor: cardHovered
-              ? "rgba(46,168,83,0.55)"
-              : webBorderColor,
-          },
+          IS_WEB && { borderColor: webBorderColor },
         ]}
       >
         {videoId && !hasVideoError ? (
@@ -479,7 +478,8 @@ export default function VideoGridCard({
               style={[
                 styles.statusButton,
                 IS_WEB && styles.webStatusButton,
-                IS_WEB && webTransition("background-color, border-color", 160, "ease"),
+                IS_WEB &&
+                  webTransition("background-color, border-color", 160, "ease"),
                 {
                   backgroundColor: isWatched
                     ? Colors.universal.primary
@@ -522,18 +522,16 @@ export default function VideoGridCard({
 
 const styles = StyleSheet.create({
   cardShadow: {
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.16,
-    shadowRadius: 5,
-    elevation: 3,
-    overflow: "visible",
+    borderRadius: CARD_RADIUS,
+    // shadowColor: "#000",
+    // shadowOffset: { width: 0, height: 2},
+    // shadowOpacity: 0.16,
+    // shadowRadius: 5,
+    // elevation: 3,
+    // overflow: "visible",
   },
   webCardShadow: {
-    shadowColor: "#0b1220",
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.1,
-    shadowRadius: 18,
+    borderRadius: WEB_CARD_RADIUS,
     elevation: 1,
   },
   webCardMotion: {
@@ -544,18 +542,18 @@ const styles = StyleSheet.create({
     shadowColor: "#0b1220",
     shadowOffset: { width: 0, height: 16 },
     shadowOpacity: 0.18,
-    shadowRadius: 32,
+    shadowRadius: 24,
     transform: [{ translateY: -6 }],
   },
 
   card: {
     width: "100%",
-    borderRadius: 18,
+    borderRadius: CARD_RADIUS,
     overflow: "hidden",
     borderWidth: 0.6,
   },
   webCard: {
-    borderRadius: 14,
+    borderRadius: WEB_CARD_RADIUS,
     borderWidth: 1,
   },
 
@@ -713,17 +711,18 @@ const styles = StyleSheet.create({
   statusButton: {
     flex: 1,
     minHeight: 38,
-    borderRadius: 8,
+    borderRadius: STATUS_BUTTON_RADIUS,
     borderWidth: StyleSheet.hairlineWidth,
     paddingHorizontal: 10,
     alignItems: "center",
     justifyContent: "center",
     flexDirection: "row",
     gap: 6,
+    overflow: "hidden",
   },
   webStatusButton: {
     minHeight: 32,
-    borderRadius: 7,
+    borderRadius: STATUS_BUTTON_RADIUS,
     paddingHorizontal: 8,
     gap: 5,
   },

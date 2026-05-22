@@ -246,10 +246,6 @@ export default function VideoGridList({
               IS_WEB && styles.webRowContent,
             ]}
             style={styles.rowList}
-            initialNumToRender={3}
-            maxToRenderPerBatch={4}
-            windowSize={5}
-            removeClippedSubviews
           />
         </View>
       );

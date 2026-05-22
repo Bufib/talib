@@ -301,6 +301,7 @@ export default function VideoScreen() {
           styles.header,
           IS_WEB && styles.webHeader,
           {
+            backgroundColor: Colors[colorScheme].contrast,
             borderBottomColor: colors.backgroundElement,
             flexDirection: rtl ? "row-reverse" : "row",
             paddingTop: insets.top + 4,
@@ -546,9 +547,9 @@ const styles = StyleSheet.create({
   webPlayerCard: {
     borderRadius: 16,
     shadowColor: "#0b1220",
-    shadowOffset: { width: 0, height: 18 },
+    shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.3,
-    shadowRadius: 44,
+    shadowRadius: 2,
   },
   playerLoadingOverlay: {
     ...StyleSheet.absoluteFillObject,
