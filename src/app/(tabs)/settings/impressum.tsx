@@ -66,7 +66,7 @@ export default function Impressum() {
             {impressum}
           </Markdown>
           <ThemedView style={{ flexDirection: "row", gap: 5 }}>
-            <Markdown
+            {/* <Markdown
               style={{
                 body: {
                   textAlign: "justify",
@@ -82,7 +82,7 @@ export default function Impressum() {
               }}
             >
               {quelle}
-            </Markdown>
+            </Markdown> */}
             <Markdown
               style={{
                 body: {
