@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import NetInfo, { type NetInfoState } from "@react-native-community/netinfo";
 
-const OFFLINE_CONFIRMATION_DELAY_MS = 1500;
+const OFFLINE_CONFIRMATION_DELAY_MS = 3000;
 
 export type ConnectionStatus = "unknown" | "online" | "offline";
 
