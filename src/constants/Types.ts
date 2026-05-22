@@ -83,6 +83,7 @@ export type YoutubeVideoPlayerProps = {
   width: number;
   height: number;
   play: boolean;
+  autoFullscreen?: boolean;
   initialPlayerParams?: YoutubeVideoPlayerParams;
   onChangeState?: (state: YoutubePlayerState | string) => void;
   onError?: () => void;
@@ -91,5 +92,6 @@ export type YoutubeVideoPlayerProps = {
 
 export type YoutubeVideoPlayerRef = {
   getCurrentTime: () => Promise<number>;
+  requestFullscreen: () => Promise<boolean>;
   seekTo: (seconds: number, allowSeekAhead: boolean) => void;
 };

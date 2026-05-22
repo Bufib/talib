@@ -8,3 +8,5 @@ export function useColorScheme(): "light" | "dark" {
   const scheme = useRNColorScheme();
   return scheme === "dark" ? "dark" : "light";
 }
+
+export function setWebColorScheme(_isDarkMode: boolean) {}

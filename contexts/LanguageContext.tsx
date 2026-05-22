@@ -1,5 +1,6 @@
 import { LanguageContextType, LanguageCode } from "@/constants/Types";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as Localization from "expo-localization";
 import React, {
   createContext,
   ReactNode,
@@ -9,6 +10,7 @@ import React, {
   useState,
   useCallback,
 } from "react";
+import { Platform } from "react-native";
 import { useTranslation } from "react-i18next";
 
 const DEFAULT_LANG: LanguageCode = "de";
@@ -19,10 +21,67 @@ const USER_PICKED_KEY = "userPickedLanguage";
 // Sprachauswahl wieder angezeigt wird.
 const FORCE_DEFAULT_LANGUAGE = false;
 
+const GERMAN_REGION_CODES = new Set(["AT", "CH", "DE"]);
+
+const ARABIC_REGION_CODES = new Set([
+  "AE",
+  "BH",
+  "DJ",
+  "DZ",
+  "EG",
+  "EH",
+  "IQ",
+  "JO",
+  "KM",
+  "KW",
+  "LB",
+  "LY",
+  "MA",
+  "MR",
+  "OM",
+  "PS",
+  "QA",
+  "SA",
+  "SD",
+  "SO",
+  "SY",
+  "TD",
+  "TN",
+  "YE",
+]);
+
 function isValidLanguage(
   value: string | null | undefined,
 ): value is LanguageCode {
   return value === "de" || value === "en" || value === "ar";
+}
+
+function normalizeRegionCode(value: string | null | undefined) {
+  return value?.trim().toUpperCase() ?? null;
+}
+
+function normalizeLanguageCode(value: string | null | undefined) {
+  return value?.trim().toLowerCase() ?? null;
+}
+
+function getLocalizedWebLanguage(): LanguageCode {
+  try {
+    const [locale] = Localization.getLocales();
+    const regionCode = normalizeRegionCode(locale.regionCode);
+    const languageCode = normalizeLanguageCode(locale.languageCode);
+
+    if (regionCode && GERMAN_REGION_CODES.has(regionCode)) return "de";
+    if (regionCode && ARABIC_REGION_CODES.has(regionCode)) return "ar";
+
+    if (languageCode === "de") return "de";
+    if (languageCode === "ar") return "ar";
+  } catch (error) {
+    if (__DEV__) {
+      console.warn("Failed to detect web locale:", error);
+    }
+  }
+
+  return "en";
 }
 
 const LanguageContext = createContext<LanguageContextType>({
@@ -69,6 +128,16 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
           }
           if (!mounted) return;
           setLang(storedLanguage);
+          setHasStoredLanguage(true);
+        } else if (Platform.OS === "web") {
+          const localizedLanguage = getLocalizedWebLanguage();
+
+          if (i18n.language !== localizedLanguage) {
+            await i18n.changeLanguage(localizedLanguage);
+          }
+
+          if (!mounted) return;
+          setLang(localizedLanguage);
           setHasStoredLanguage(true);
         } else {
           if (!mounted) return;

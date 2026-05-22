@@ -1,5 +1,5 @@
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
-import { useColorScheme } from "@/hooks/useColorScheme";
+import { setWebColorScheme, useColorScheme } from "@/hooks/useColorScheme";
 import { ThemedText } from "@/components/ThemedText";
 import { Colors } from "@/constants/Colors";
 import { useLanguage } from "../../../../contexts/LanguageContext";
@@ -50,6 +50,11 @@ const Settings = () => {
 
   const { fadeAnim, onLayout } = useScreenFadeIn(800);
   const version = Constants.expoConfig?.version;
+
+  useEffect(() => {
+    setIsDarkMode(colorScheme === "dark");
+  }, [colorScheme]);
+
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -69,6 +74,12 @@ const Settings = () => {
     const newDarkMode = !isDarkMode;
     await AsyncStorage.setItem("isDarkMode", `${newDarkMode}`);
     setIsDarkMode(newDarkMode);
+
+    if (IS_WEB) {
+      setWebColorScheme(newDarkMode);
+      return;
+    }
+
     Appearance.setColorScheme(newDarkMode ? "dark" : "light");
   };
 

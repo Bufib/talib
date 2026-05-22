@@ -132,6 +132,8 @@ function AppContent() {
   const { t } = useTranslation();
 
   useEffect(() => {
+    if (Platform.OS === "web") return;
+
     const setColorTheme = async () => {
       try {
         const saved = await AsyncStorage.getItem("isDarkMode");
@@ -164,12 +166,13 @@ function AppContent() {
     if (!hasInternet && !hasShownOfflineToastRef.current) {
       hasShownOfflineToastRef.current = true;
 
-      Toast.show({
-        type: "error",
-        text1: t("noInternetConnectionTitle"),
-        text2: t("noInternetConnectionMessage"),
-        visibilityTime: 5000,
-      });
+      //! Internet
+      // Toast.show({
+      //   type: "error",
+      //   text1: t("noInternetConnectionTitle"),
+      //   text2: t("noInternetConnectionMessage"),
+      //   visibilityTime: 5000,
+      // });
     }
 
     if (hasInternet) {

@@ -67,6 +67,7 @@ export default function VideoScreen() {
   const [playerSize, setPlayerSize] = useState({ width: 0, height: 0 });
   const playerRef = useRef<YoutubeVideoPlayerRef | null>(null);
   const hasHandledEndRef = useRef(false);
+  const hasRequestedFullscreenRef = useRef(false);
 
   // Web-only Hover-State fuer den Favoriten-Button.
   const { hovered: favHovered, hoverProps: favHoverProps } = useHover();
@@ -120,6 +121,10 @@ export default function VideoScreen() {
       return { width: 0, height: 0 };
     }
 
+    if (!IS_WEB) {
+      return playerSize;
+    }
+
     const availableAspectRatio = playerSize.width / playerSize.height;
 
     if (availableAspectRatio > PLAYER_ASPECT_RATIO) {
@@ -133,7 +138,7 @@ export default function VideoScreen() {
       width: playerSize.width,
       height: Math.round(playerSize.width / PLAYER_ASPECT_RATIO),
     };
-  }, [playerSize.height, playerSize.width]);
+  }, [playerSize]);
 
   const onPlayerLayout = useCallback((event: LayoutChangeEvent) => {
     const nextWidth = Math.round(event.nativeEvent.layout.width);
@@ -159,6 +164,12 @@ export default function VideoScreen() {
 
   const onPlayerReady = useCallback(() => {
     setIsPlayerReady(true);
+
+    if (IS_WEB) return;
+    if (hasRequestedFullscreenRef.current) return;
+
+    hasRequestedFullscreenRef.current = true;
+    void playerRef.current?.requestFullscreen();
   }, []);
 
   const handlePlaybackEnded = useCallback(() => {
@@ -201,6 +212,11 @@ export default function VideoScreen() {
         return;
       }
 
+      if (state === "buffering" || state === "video cued") {
+        setIsPlayerReady(true);
+        return;
+      }
+
       if (state === "paused") {
         setIsPlaying(false);
         return;
@@ -215,6 +231,7 @@ export default function VideoScreen() {
 
   useEffect(() => {
     hasHandledEndRef.current = false;
+    hasRequestedFullscreenRef.current = false;
     setIsPlaying(true);
     setIsPlayerReady(false);
   }, [playerKey]);
@@ -351,10 +368,7 @@ export default function VideoScreen() {
         style={[
           styles.playerStage,
           IS_WEB && styles.webPlayerStage,
-          {
-            paddingBottom: IS_WEB ? 28 : insets.bottom,
-            backgroundColor: IS_WEB ? colors.background : "#000",
-          },
+          { backgroundColor: IS_WEB ? colors.background : "#000" },
         ]}
       >
         <View
@@ -380,6 +394,7 @@ export default function VideoScreen() {
                 height={playerDimensions.height}
                 width={playerDimensions.width}
                 play={isPlaying}
+                autoFullscreen={!IS_WEB}
                 videoId={youtubeVideoId}
                 initialPlayerParams={initialPlayerParams}
                 onChangeState={onStateChange}
@@ -499,13 +514,13 @@ const styles = StyleSheet.create({
     transform: [{ scale: 1.12 }],
   },
   playerStage: {
-    alignItems: "center",
     flex: 1,
   },
   webPlayerStage: {
+    justifyContent: "center",
+    paddingBottom: 28,
     paddingHorizontal: 28,
     paddingTop: 28,
-    justifyContent: "center",
   },
   playerFrame: {
     alignItems: "center",
@@ -544,6 +559,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#000",
     flex: 1,
     justifyContent: "center",
+    width: "100%",
   },
   playerFallbackText: {
     color: "#FFFFFF",

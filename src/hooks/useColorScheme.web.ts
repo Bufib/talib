@@ -1,22 +1,102 @@
-import { useEffect, useState } from "react";
-import { useColorScheme as useRNColorScheme } from "react-native";
+import { useEffect, useSyncExternalStore } from "react";
 
 /**
- * Web-Variante: erst nach Hydration auf System-Scheme wechseln, sonst Hydration-Mismatch.
- * Liefert garantiert "light" | "dark" zurück.
+ * react-native-web implementiert Appearance.setColorScheme aktuell nicht.
+ * Darum verwaltet Web den App-Toggle selbst und faellt ohne Override auf die
+ * Systempraeferenz zurueck.
  */
-export function useColorScheme(): "light" | "dark" {
-  const [hasHydrated, setHasHydrated] = useState(false);
+type ColorScheme = "light" | "dark";
 
-  useEffect(() => {
-    setHasHydrated(true);
-  }, []);
+const STORAGE_KEY = "isDarkMode";
+const COLOR_SCHEME_EVENT = "shiacast:web-color-scheme-change";
+const DARK_SCHEME_QUERY = "(prefers-color-scheme: dark)";
 
-  const scheme = useRNColorScheme();
+function getStoredScheme(): ColorScheme | null {
+  if (typeof window === "undefined") return null;
 
-  if (hasHydrated) {
-    return scheme === "dark" ? "dark" : "light";
+  const saved = window.localStorage.getItem(STORAGE_KEY);
+  if (saved === "true") return "dark";
+  if (saved === "false") return "light";
+
+  return null;
+}
+
+function getSystemScheme(): ColorScheme {
+  if (typeof window === "undefined") return "light";
+
+  return window.matchMedia?.(DARK_SCHEME_QUERY).matches ? "dark" : "light";
+}
+
+function getSnapshot(): ColorScheme {
+  return getStoredScheme() ?? getSystemScheme();
+}
+
+function getServerSnapshot(): ColorScheme {
+  return "light";
+}
+
+function applyDocumentScheme(scheme: ColorScheme) {
+  if (typeof document === "undefined") return;
+
+  document.documentElement.style.colorScheme = scheme;
+  document.documentElement.dataset.colorScheme = scheme;
+}
+
+function subscribe(onStoreChange: () => void) {
+  if (typeof window === "undefined") return () => {};
+
+  const onStorage = (event: StorageEvent) => {
+    if (event.key === STORAGE_KEY) onStoreChange();
+  };
+
+  const mediaQuery = window.matchMedia?.(DARK_SCHEME_QUERY);
+  const onMediaChange = () => onStoreChange();
+
+  window.addEventListener(COLOR_SCHEME_EVENT, onStoreChange);
+  window.addEventListener("storage", onStorage);
+
+  if (mediaQuery) {
+    if (typeof mediaQuery.addEventListener === "function") {
+      mediaQuery.addEventListener("change", onMediaChange);
+    } else {
+      mediaQuery.addListener(onMediaChange);
+    }
   }
 
-  return "light";
+  return () => {
+    window.removeEventListener(COLOR_SCHEME_EVENT, onStoreChange);
+    window.removeEventListener("storage", onStorage);
+
+    if (!mediaQuery) return;
+
+    if (typeof mediaQuery.removeEventListener === "function") {
+      mediaQuery.removeEventListener("change", onMediaChange);
+    } else {
+      mediaQuery.removeListener(onMediaChange);
+    }
+  };
+}
+
+export function setWebColorScheme(isDarkMode: boolean) {
+  if (typeof window === "undefined") return;
+
+  const scheme: ColorScheme = isDarkMode ? "dark" : "light";
+
+  window.localStorage.setItem(STORAGE_KEY, `${isDarkMode}`);
+  applyDocumentScheme(scheme);
+  window.dispatchEvent(new Event(COLOR_SCHEME_EVENT));
+}
+
+export function useColorScheme(): "light" | "dark" {
+  const scheme = useSyncExternalStore(
+    subscribe,
+    getSnapshot,
+    getServerSnapshot,
+  );
+
+  useEffect(() => {
+    applyDocumentScheme(scheme);
+  }, [scheme]);
+
+  return scheme;
 }
