@@ -1,4 +1,5 @@
 import { useEffect, useSyncExternalStore } from "react";
+import { Colors } from "@/constants/Colors";
 
 /**
  * react-native-web implementiert Appearance.setColorScheme aktuell nicht.
@@ -38,8 +39,16 @@ function getServerSnapshot(): ColorScheme {
 function applyDocumentScheme(scheme: ColorScheme) {
   if (typeof document === "undefined") return;
 
+  const backgroundColor = Colors[scheme].background;
+
   document.documentElement.style.colorScheme = scheme;
+  document.documentElement.style.backgroundColor = backgroundColor;
   document.documentElement.dataset.colorScheme = scheme;
+
+  document.body.style.backgroundColor = backgroundColor;
+
+  const root = document.getElementById("root");
+  root?.style.setProperty("background-color", backgroundColor);
 }
 
 function subscribe(onStoreChange: () => void) {

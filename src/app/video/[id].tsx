@@ -45,6 +45,7 @@ import { getYoutubeVideoId, parseYoutubeTime } from "../../../utils/youtube";
 
 const IS_WEB = Platform.OS === "web";
 const PLAYER_ASPECT_RATIO = 16 / 9;
+const WEB_FULL_HEIGHT_PLAYER_BREAKPOINT = 640;
 
 function firstYoutubeTime(...values: (string | number | null | undefined)[]) {
   for (const value of values) {
@@ -122,6 +123,10 @@ export default function VideoScreen() {
     }
 
     if (!IS_WEB) {
+      return playerSize;
+    }
+
+    if (playerSize.width <= WEB_FULL_HEIGHT_PLAYER_BREAKPOINT) {
       return playerSize;
     }
 

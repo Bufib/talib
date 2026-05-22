@@ -20,7 +20,7 @@ import {
   StyleSheet,
   Switch,
   View,
-  Animated
+  Animated,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -34,16 +34,15 @@ const WEB_TAB_BAR_TOP_OFFSET = 80;
 const Settings = () => {
   const colorScheme = useColorScheme();
   const webBorderColor =
-    colorScheme === "dark"
-      ? "rgba(255,255,255,0.09)"
-      : "rgba(17,24,28,0.08)";
+    colorScheme === "dark" ? "rgba(255,255,255,0.09)" : "rgba(17,24,28,0.08)";
   const [isDarkMode, setIsDarkMode] = useState(colorScheme === "dark");
   const [payPalLink, setPayPalLink] = useState<string | null>("");
 
   const { getNotifications, toggleGetNotifications, permissionStatus } =
     useNotificationStore();
   const { rtl } = useLanguage();
-  const hasInternet = useConnectionStatus();
+  const connectionStatus = useConnectionStatus();
+  const hasInternet = connectionStatus !== "offline";
   const effectiveEnabled = getNotifications && permissionStatus === "granted";
 
   const { t } = useTranslation();
@@ -118,51 +117,16 @@ const Settings = () => {
           showsVerticalScrollIndicator={false}
         >
           <View style={IS_WEB ? styles.webColumn : undefined}>
-          <View
-            style={[
-              styles.section,
-              IS_WEB && styles.webSection,
-              IS_WEB && {
-                backgroundColor: Colors[colorScheme].contrast,
-                borderColor: webBorderColor,
-              },
-            ]}
-          >
             <View
               style={[
-                styles.settingRow,
-                rtl && styles.rtl,
-                IS_WEB && styles.webSettingRow,
-                IS_WEB && { borderBottomColor: webBorderColor },
+                styles.section,
+                IS_WEB && styles.webSection,
+                IS_WEB && {
+                  backgroundColor: Colors[colorScheme].contrast,
+                  borderColor: webBorderColor,
+                },
               ]}
             >
-              <View>
-                <ThemedText
-                  style={[styles.settingTitle, rtl && { textAlign: "right" }]}
-                >
-                  {t("darkMode")}
-                </ThemedText>
-                <ThemedText
-                  style={[
-                    styles.settingSubtitle,
-                    rtl && { textAlign: "right" },
-                  ]}
-                >
-                  {t("enableDarkMode")}
-                </ThemedText>
-              </View>
-              <Switch
-                value={isDarkMode}
-                onValueChange={toggleDarkMode}
-                trackColor={{
-                  false: Colors.light.trackColor,
-                  true: Colors.dark.trackColor,
-                }}
-                thumbColor={Colors[colorScheme].thumbColor}
-              />
-            </View>
-
-            {!IS_WEB && (
               <View
                 style={[
                   styles.settingRow,
@@ -173,12 +137,9 @@ const Settings = () => {
               >
                 <View>
                   <ThemedText
-                    style={[
-                      styles.settingTitle,
-                      rtl && { textAlign: "right" },
-                    ]}
+                    style={[styles.settingTitle, rtl && { textAlign: "right" }]}
                   >
-                    {t("notifications")}
+                    {t("darkMode")}
                   </ThemedText>
                   <ThemedText
                     style={[
@@ -186,94 +147,125 @@ const Settings = () => {
                       rtl && { textAlign: "right" },
                     ]}
                   >
-                    {t("receivePushNotifications")}
+                    {t("enableDarkMode")}
                   </ThemedText>
                 </View>
                 <Switch
-                  value={effectiveEnabled}
-                  onValueChange={() => {
-                    if (!hasInternet) return;
-                    toggleGetNotifications();
-                  }}
+                  value={isDarkMode}
+                  onValueChange={toggleDarkMode}
                   trackColor={{
                     false: Colors.light.trackColor,
                     true: Colors.dark.trackColor,
                   }}
-                  thumbColor={
-                    isDarkMode
-                      ? Colors.light.thumbColor
-                      : Colors.dark.thumbColor
-                  }
+                  thumbColor={Colors[colorScheme].thumbColor}
                 />
               </View>
-            )}
 
-            <LanguageSwitcher disabled={false} />
-            {/* //! Auf false */}
+              {!IS_WEB && (
+                <View
+                  style={[
+                    styles.settingRow,
+                    rtl && styles.rtl,
+                    IS_WEB && styles.webSettingRow,
+                    IS_WEB && { borderBottomColor: webBorderColor },
+                  ]}
+                >
+                  <View>
+                    <ThemedText
+                      style={[
+                        styles.settingTitle,
+                        rtl && { textAlign: "right" },
+                      ]}
+                    >
+                      {t("notifications")}
+                    </ThemedText>
+                    <ThemedText
+                      style={[
+                        styles.settingSubtitle,
+                        rtl && { textAlign: "right" },
+                      ]}
+                    >
+                      {t("receivePushNotifications")}
+                    </ThemedText>
+                  </View>
+                  <Switch
+                    value={effectiveEnabled}
+                    onValueChange={() => {
+                      if (!hasInternet) return;
+                      toggleGetNotifications();
+                    }}
+                    trackColor={{
+                      false: Colors.light.trackColor,
+                      true: Colors.dark.trackColor,
+                    }}
+                    thumbColor={
+                      isDarkMode
+                        ? Colors.light.thumbColor
+                        : Colors.dark.thumbColor
+                    }
+                  />
+                </View>
+              )}
 
-            <View style={{ gap: 10 }}>
-              <ClearAppCacheButton />
-              <FeedbackButton />
+              <LanguageSwitcher disabled={false} />
+
+              <View style={{ gap: 10 }}>
+                {!IS_WEB ? <ClearAppCacheButton /> : null}
+                <FeedbackButton />
+              </View>
             </View>
-          </View>
 
-          <Pressable
-            style={styles.paypalButton}
-            onPress={() => payPalLink && handleOpenExternalUrl(payPalLink)}
-          >
-            <Image
-              source={require("@/assets/images/paypal.png")}
-              style={[styles.paypalImage, IS_WEB && styles.webPaypalImage]}
-            />
-          </Pressable>
-
-          <View style={styles.infoSection}>
-            <ThemedText
-              style={[styles.versionText, rtl && { textAlign: "right" }]}
-            >
-              {t("appVersion")} : {}
-              {version}
-            </ThemedText>
-          </View>
-
-          <View
-            style={[
-              styles.footer,
-              rtl && { flexDirection: "row-reverse" },
-              { borderTopColor: Colors[colorScheme].border },
-              IS_WEB && styles.webFooter,
-            ]}
-          >
             <Pressable
-              onPress={() =>
-                handleOpenExternalUrl(
-                  "https://bufib.github.io/Islam-Fragen-App-rechtliches/datenschutz",
-                )
-              }
+              style={styles.paypalButton}
+              onPress={() => payPalLink && handleOpenExternalUrl(payPalLink)}
             >
-              <ThemedText
-                style={[styles.footerLink, rtl && { textAlign: "right" }]}
-              >
-                {t("dataPrivacy")}
-              </ThemedText>
+              <Image
+                source={require("@/assets/images/paypal.png")}
+                style={[styles.paypalImage, IS_WEB && styles.webPaypalImage]}
+              />
             </Pressable>
 
-            <Pressable onPress={() => router.push("/settings/about")}>
-              <ThemedText
-                style={[styles.footerLink, rtl && { textAlign: "right" }]}
-              >
-                {t("aboutTheApp")}
-              </ThemedText>
-            </Pressable>
+            {!IS_WEB ? (
+              <View style={styles.infoSection}>
+                <ThemedText
+                  style={[styles.versionText, rtl && { textAlign: "right" }]}
+                >
+                  {t("appVersion")} : {}
+                  {version}
+                </ThemedText>
+              </View>
+            ) : null}
 
-            <Pressable onPress={() => router.push("/settings/impressum")}>
-              <ThemedText
-                style={[styles.footerLink, rtl && { textAlign: "right" }]}
+            <View
+              style={[
+                styles.footer,
+                rtl && { flexDirection: "row-reverse" },
+                { borderTopColor: Colors[colorScheme].border },
+                IS_WEB && styles.webFooter,
+              ]}
+            >
+              <Pressable
+                onPress={() =>
+                  handleOpenExternalUrl(
+                    "https://bufib.github.io/Islam-Fragen-App-rechtliches/datenschutz",
+                  )
+                }
               >
-                {t("imprint")}
-              </ThemedText>
-            </Pressable>
-          </View>
+                <ThemedText
+                  style={[styles.footerLink, rtl && { textAlign: "right" }]}
+                >
+                  {t("dataPrivacy")}
+                </ThemedText>
+              </Pressable>
+
+              <Pressable onPress={() => router.push("/settings/impressum")}>
+                <ThemedText
+                  style={[styles.footerLink, rtl && { textAlign: "right" }]}
+                >
+                  {t("imprint")}
+                </ThemedText>
+              </Pressable>
+            </View>
           </View>
         </ScrollView>
       </SafeAreaView>
@@ -387,7 +379,8 @@ const styles = StyleSheet.create({
   },
   footer: {
     flexDirection: "row",
-    justifyContent: "space-evenly",
+    justifyContent: "center",
+    gap: 20,
     borderTopWidth: 0.5,
     marginBottom: 40,
     paddingTop: 15,

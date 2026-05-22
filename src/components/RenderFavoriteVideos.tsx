@@ -14,6 +14,7 @@ import { useTranslation } from "react-i18next";
 import {
   Alert,
   Animated,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -21,6 +22,9 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+
+const IS_WEB = Platform.OS === "web";
+const WEB_TAB_BAR_TOP_OFFSET = 80;
 
 export default function RenderFavoriteVideos() {
   const { lang, rtl } = useLanguage();
@@ -229,7 +233,7 @@ export default function RenderFavoriteVideos() {
         {
           opacity: fadeAnim,
           backgroundColor: colors.background,
-          paddingTop: insets.top,
+          paddingTop: IS_WEB ? WEB_TAB_BAR_TOP_OFFSET : insets.top,
         },
         // Platform.OS === "ios" &&
         //   parseInt(Platform.Version, 10) >= 26 && {

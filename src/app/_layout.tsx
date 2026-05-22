@@ -23,12 +23,16 @@ import ForceUpdateGate from "@/components/ForceUpdateGate";
 import IntroVideo, { useIntroVideo } from "@/components/Intro";
 import LanguageSelection from "@/components/LanguageSelectionScreen";
 import { SupabaseRealtimeProvider } from "@/components/SupabaseRealtimeProvider";
+import { Colors } from "@/constants/Colors";
 import { useVideoFinishedStore } from "@/hooks/useVideoFinishedStore";
 import { useVideoWatchedStore } from "@/hooks/useVideoWatchedStore";
 import { LanguageProvider, useLanguage } from "../../contexts/LanguageContext";
 import useNotificationStore from "../../stores/notificationStore";
 import { useColorScheme } from "../hooks/useColorScheme";
-import { useConnectionStatus } from "../hooks/useConnectionStatus";
+import {
+  type ConnectionStatus,
+  useConnectionStatus,
+} from "../hooks/useConnectionStatus";
 import { usePushNotifications } from "../hooks/usePushNotifications";
 import { useFontSizeStore } from "../../stores/fontSizeStore";
 import { useVideoFavoriteFoldersStore } from "../../stores/videoFavoriteFoldersStore";
@@ -120,14 +124,14 @@ function AppContent() {
 
   const storesHydrated = useAllStoresHydrated();
 
-  const hasInternet = useConnectionStatus();
+  const connectionStatus = useConnectionStatus();
 
   // Push-Notification-Registration: kein Auto-Permission-Request,
   // nur reagieren wenn User in Settings den Toggle aktiviert + OS-Permission granted.
   usePushNotifications();
 
   const hasHiddenSplashRef = useRef(false);
-  const hasShownOfflineToastRef = useRef(false);
+  const previousConnectionStatusRef = useRef<ConnectionStatus>("unknown");
 
   const { t } = useTranslation();
 
@@ -162,23 +166,25 @@ function AppContent() {
 
   useEffect(() => {
     if (!essentialsReady) return;
+    if (connectionStatus === "unknown") return;
 
-    if (!hasInternet && !hasShownOfflineToastRef.current) {
-      hasShownOfflineToastRef.current = true;
+    const previousConnectionStatus = previousConnectionStatusRef.current;
+    previousConnectionStatusRef.current = connectionStatus;
 
-      //! Internet
-      // Toast.show({
-      //   type: "error",
-      //   text1: t("noInternetConnectionTitle"),
-      //   text2: t("noInternetConnectionMessage"),
-      //   visibilityTime: 5000,
-      // });
+    if (
+      previousConnectionStatus !== "online" ||
+      connectionStatus !== "offline"
+    ) {
+      return;
     }
 
-    if (hasInternet) {
-      hasShownOfflineToastRef.current = false;
-    }
-  }, [essentialsReady, hasInternet, t]);
+    Toast.show({
+      type: "error",
+      text1: t("noInternetConnectionTitle"),
+      text2: t("noInternetConnectionMessage"),
+      visibilityTime: 5000,
+    });
+  }, [connectionStatus, essentialsReady, t]);
 
   const hideSplashIfReady = useCallback(() => {
     if (hasHiddenSplashRef.current) return;
@@ -205,8 +211,16 @@ function AppContent() {
   const showAppGate = gateMode !== null;
 
   return (
-    <View style={styles.root} onLayout={hideSplashIfReady}>
-      <GestureHandlerRootView style={styles.root}>
+    <View
+      style={[styles.root, { backgroundColor: Colors[colorScheme].background }]}
+      onLayout={hideSplashIfReady}
+    >
+      <GestureHandlerRootView
+        style={[
+          styles.root,
+          { backgroundColor: Colors[colorScheme].background },
+        ]}
+      >
         <ThemeProvider
           value={colorScheme === "dark" ? DarkTheme : DefaultTheme}
         >

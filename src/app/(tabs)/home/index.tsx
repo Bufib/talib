@@ -545,6 +545,7 @@ const styles = StyleSheet.create({
   },
   keyboardAvoidingView: {
     flex: 1,
+    backgroundColor: "transparent"
   },
   headerWrapper: {
     paddingBottom: 16,

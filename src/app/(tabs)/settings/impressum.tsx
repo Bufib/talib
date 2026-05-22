@@ -17,33 +17,13 @@ export default function Impressum() {
  # **Impressum** 
 
  **Angaben gemäß § 5 TMG:**
- Bund für islamische Bildung e. V.
- Füssener Str. 15
- 12309 Berlin
+ Hadi El Ali
+ Mangenberger Straße 206
+ 42655 Solingen
  
- # **Vertreten durch:**
-
- Samer Khalil (1. Vorsitzender)
- Anne-Maria Nowak (2. Vorsitzende)
- Mohammad Klait (Schriftführer)
-
- # **Kontakt:**
- E-Mail: info@bufib.de
- 
- # **Registereintrag:**
-
- Eintragung im Vereinsregister.
- Registergericht: Amtsgericht Berlin-Charlottenburg
- Registernummer: VR 32921
-
- # **Steuernummer:** 
-
- 27/657/53847
-
-# **Verantwortlich für den Inhalt**
-# **nach § 55 Abs. 2 RStV:**
-
- Bund für islamische Bildung e.V.  `;
+ Telefon: 015785691987
+ email: hadielali@web.de
+ `;
 
   const quelle = `Quelle: `;
   const link = `[http://www.e-recht24.de](http://www.e-recht24.de)`;

@@ -1,31 +1,89 @@
 import { useState, useEffect } from "react";
-import NetInfo from "@react-native-community/netinfo";
+import NetInfo, { type NetInfoState } from "@react-native-community/netinfo";
 
+const OFFLINE_CONFIRMATION_DELAY_MS = 1500;
 
-export const useConnectionStatus = () => {
-  const [hasInternet, setHasInternet] = useState(true);
+export type ConnectionStatus = "unknown" | "online" | "offline";
+
+function getConnectionStatus(networkState: NetInfoState): ConnectionStatus {
+  if (
+    networkState.isConnected === false ||
+    networkState.isInternetReachable === false
+  ) {
+    return "offline";
+  }
+
+  if (networkState.isConnected === true) {
+    return "online";
+  }
+
+  return "unknown";
+}
+
+export const useConnectionStatus = (): ConnectionStatus => {
+  const [status, setStatus] = useState<ConnectionStatus>("unknown");
 
   useEffect(() => {
+    let mounted = true;
+    let offlineTimeout: ReturnType<typeof setTimeout> | null = null;
+
+    const clearOfflineTimeout = () => {
+      if (!offlineTimeout) return;
+
+      clearTimeout(offlineTimeout);
+      offlineTimeout = null;
+    };
+
+    const applyNetworkState = (networkState: NetInfoState) => {
+      if (!mounted) return;
+
+      const nextStatus = getConnectionStatus(networkState);
+
+      if (nextStatus === "online") {
+        clearOfflineTimeout();
+        setStatus("online");
+        return;
+      }
+
+      if (nextStatus === "unknown") {
+        clearOfflineTimeout();
+        setStatus((currentStatus) =>
+          currentStatus === "unknown" ? "unknown" : currentStatus,
+        );
+        return;
+      }
+
+      if (offlineTimeout) return;
+
+      offlineTimeout = setTimeout(() => {
+        if (!mounted) return;
+
+        setStatus("offline");
+        offlineTimeout = null;
+      }, OFFLINE_CONFIRMATION_DELAY_MS);
+    };
+
     const checkConnection = async () => {
       try {
         const networkState = await NetInfo.fetch();
-        const isConnected = Boolean(networkState.isConnected && networkState.isInternetReachable !== false);
-        setHasInternet(isConnected);
+        applyNetworkState(networkState);
       } catch (error) {
-        console.error("Error checking connection:", error);
-        setHasInternet(false);
+        if (__DEV__) {
+          console.warn("Error checking connection:", error);
+        }
       }
     };
 
     checkConnection();
-    
-    const unsubscribe = NetInfo.addEventListener((state) => {
-      const isConnected = Boolean(state.isConnected && state.isInternetReachable !== false);
-      setHasInternet(isConnected);
-    });
 
-    return () => unsubscribe();
+    const unsubscribe = NetInfo.addEventListener(applyNetworkState);
+
+    return () => {
+      mounted = false;
+      clearOfflineTimeout();
+      unsubscribe();
+    };
   }, []);
 
-  return hasInternet;
+  return status;
 };
