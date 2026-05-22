@@ -165,6 +165,15 @@ export default function VideoGridList({
 
   const renderSection = useCallback(
     ({ item: section }: ListRenderItemInfo<TopicVideoSection>) => {
+      const getTopicItemLayout = (
+        _data: ArrayLike<VideoType> | null | undefined,
+        index: number,
+      ) => ({
+        length: topicCardWidth,
+        offset: (topicCardWidth + ROW_CARD_GAP) * index,
+        index,
+      });
+
       const renderVideo = ({ item }: ListRenderItemInfo<VideoType>) => {
         return (
           <View style={styles.itemWrapper}>
@@ -235,7 +244,8 @@ export default function VideoGridList({
           <FlatList
             data={section.videos}
             horizontal
-            keyExtractor={(item) => `${section.key}:${item.id}`}
+            keyExtractor={(item) => item.id.toString()}
+            getItemLayout={getTopicItemLayout}
             renderItem={renderVideo}
             ItemSeparatorComponent={TopicCardSeparator}
             keyboardShouldPersistTaps="handled"
@@ -296,7 +306,7 @@ export default function VideoGridList({
         initialNumToRender={8}
         maxToRenderPerBatch={8}
         windowSize={7}
-        removeClippedSubviews
+        removeClippedSubviews={!IS_WEB}
       />
     );
   }
@@ -327,7 +337,7 @@ export default function VideoGridList({
       initialNumToRender={4}
       maxToRenderPerBatch={4}
       windowSize={7}
-      removeClippedSubviews
+      removeClippedSubviews={!IS_WEB}
     />
   );
 }
