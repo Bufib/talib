@@ -53,9 +53,11 @@ const favoriteFolderSheetOptions = {
   gestureEnabled: true,
   contentStyle: { backgroundColor: "transparent" },
   webModalStyle: {
-    width: 560,
-    minHeight: "55%",
-    height: "80%",
+    width: 480,
+    maxWidth: "100%",
+    minHeight: 360,
+    height: "82%",
+    maxHeight: 560,
   },
 };
 

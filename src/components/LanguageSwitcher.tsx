@@ -1,5 +1,6 @@
 import React from "react";
 import {
+  Platform,
   View,
   Pressable,
   Text,
@@ -20,6 +21,8 @@ const LANGS: Lang[] = [
   { code: "en", labelKey: "english" },
   { code: "ar", labelKey: "arabic" },
 ];
+
+const IS_WEB = Platform.OS === "web";
 
 export function LanguageSwitcher({ disabled = false }: { disabled?: boolean }) {
   const { lang, rtl, setAppLanguage, ready: langReady } = useLanguage();
@@ -42,7 +45,7 @@ export function LanguageSwitcher({ disabled = false }: { disabled?: boolean }) {
         disabled && styles.containerDisabled,
       ]}
     >
-      <View>
+      <View style={styles.labelColumn}>
         <ThemedText style={[styles.title, rtl && styles.rtlText]}>
           {t("language")}
         </ThemedText>
@@ -54,6 +57,12 @@ export function LanguageSwitcher({ disabled = false }: { disabled?: boolean }) {
       <View style={[styles.buttons, rtl && styles.rtlButtons]}>
         {LANGS.map(({ code, labelKey }) => {
           const isActive = lang === code;
+          const webButtonMargin = rtl
+            ? { marginLeft: 0, marginRight: 6 }
+            : { marginLeft: 6, marginRight: 0 };
+          const nativeButtonMargin = rtl
+            ? { marginLeft: 0, marginRight: 8 }
+            : null;
           return (
             <Pressable
               key={code}
@@ -61,17 +70,22 @@ export function LanguageSwitcher({ disabled = false }: { disabled?: boolean }) {
               onPress={() => handlePick(code)}
               style={({ pressed }) => [
                 styles.button,
+                IS_WEB && styles.webButton,
                 isActive && styles.buttonActive,
                 {
                   opacity: pressed ? 0.8 : 1,
-                  paddingHorizontal: isLarge ? 12 : 7,
+                  paddingHorizontal: IS_WEB ? 8 : isLarge ? 12 : 7,
                 },
-                rtl && { marginLeft: 0, marginRight: 8 },
+                IS_WEB ? webButtonMargin : nativeButtonMargin,
                 disabled && styles.buttonDisabled,
               ]}
             >
               <Text
-                style={[styles.buttonText, isActive && styles.buttonTextActive]}
+                style={[
+                  styles.buttonText,
+                  IS_WEB && styles.webButtonText,
+                  isActive && styles.buttonTextActive,
+                ]}
               >
                 {t(labelKey)}
               </Text>
@@ -91,6 +105,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingVertical: 12,
     marginBottom: 8,
+    gap: 8,
+  },
+  labelColumn: {
+    flexShrink: 1,
   },
   containerDisabled: {
     opacity: 0.6,
@@ -106,6 +124,7 @@ const styles = StyleSheet.create({
   },
   buttons: {
     flexDirection: "row",
+    flexShrink: 0,
   },
   button: {
     paddingVertical: 6,
@@ -113,6 +132,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.universal.link,
     marginLeft: 8,
+  },
+  webButton: {
+    paddingVertical: 4,
+    borderRadius: 5,
   },
   buttonActive: {
     backgroundColor: Colors.universal.link,
@@ -124,6 +147,9 @@ const styles = StyleSheet.create({
   buttonText: {
     fontSize: 14,
     color: Colors.universal.link,
+  },
+  webButtonText: {
+    fontSize: 12,
   },
   buttonTextActive: {
     color: "#fff",

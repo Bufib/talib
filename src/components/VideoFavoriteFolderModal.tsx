@@ -118,6 +118,7 @@ export default function VideoFavoriteFolderModal({ videoId }: Props) {
       </View>
 
       <ScrollView
+        style={styles.scrollArea}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={styles.scrollContent}
@@ -288,6 +289,11 @@ const styles = StyleSheet.create({
     height: 32,
     alignItems: "center",
     justifyContent: "center",
+  },
+
+  scrollArea: {
+    flex: 1,
+    minHeight: 0,
   },
 
   scrollContent: {

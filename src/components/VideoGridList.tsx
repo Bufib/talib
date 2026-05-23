@@ -26,6 +26,11 @@ const HORIZONTAL_PADDING = IS_WEB ? 10 : 16;
 const ROW_CARD_GAP = IS_WEB ? 12 : 14;
 const GRID_CARD_GAP = 12;
 const UNCATEGORIZED_TOPIC_KEY = "__uncategorized__";
+const GRID_ITEM_PADDING_BOTTOM = 16;
+// Worst-case Card-Hoehe (Web): Thumbnail (16:9) + Title/Author/Date/Button.
+// Author-Row ist konditional – wir reservieren immer Platz, damit FlatList
+// stabile Offsets behaelt und beim Schnellscrollen nicht springt.
+const WEB_GRID_CARD_CONTENT_HEIGHT = 144;
 
 type TopicVideoSection = {
   key: string;
@@ -136,6 +141,19 @@ export default function VideoGridList({
     });
   }, [lang, uncategorizedTitle, videos]);
 
+  // Stabile Card-Hoehe auf Web, damit FlatList beim Schnellscrollen
+  // keine variierenden Item-Hoehen schaetzen muss (Author-Row ist konditional).
+  const webGridCardMinHeight = useMemo(() => {
+    if (!IS_WEB) return undefined;
+    const thumbnailHeight = Math.round(gridCardWidth * (9 / 16));
+    return thumbnailHeight + WEB_GRID_CARD_CONTENT_HEIGHT;
+  }, [gridCardWidth]);
+
+  const webGridRowHeight = useMemo(() => {
+    if (!webGridCardMinHeight) return undefined;
+    return webGridCardMinHeight + GRID_ITEM_PADDING_BOTTOM;
+  }, [webGridCardMinHeight]);
+
   const renderGridItem = useCallback(
     ({ item }: ListRenderItemInfo<VideoType>) => {
       const isWebCentered = IS_WEB && gridColumns === 1;
@@ -147,9 +165,15 @@ export default function VideoGridList({
             isWebCentered
               ? styles.webCenteredGridItem
               : { width: gridCardWidth },
+            webGridCardMinHeight ? { minHeight: webGridCardMinHeight } : null,
           ]}
         >
-          <View style={{ width: gridCardWidth }}>
+          <View
+            style={[
+              { width: gridCardWidth },
+              webGridCardMinHeight ? { minHeight: webGridCardMinHeight } : null,
+            ]}
+          >
             <VideoGridCard
               video={item}
               width={gridCardWidth}
@@ -160,8 +184,17 @@ export default function VideoGridList({
         </View>
       );
     },
-    [gridCardWidth, gridColumns, lang, rtl],
+    [gridCardWidth, gridColumns, lang, rtl, webGridCardMinHeight],
   );
+
+  const getGridItemLayout = useMemo(() => {
+    if (!IS_WEB || !webGridRowHeight || gridColumns !== 1) return undefined;
+    return (_: ArrayLike<VideoType> | null | undefined, index: number) => ({
+      length: webGridRowHeight,
+      offset: webGridRowHeight * index,
+      index,
+    });
+  }, [gridColumns, webGridRowHeight]);
 
   const renderSection = useCallback(
     ({ item: section }: ListRenderItemInfo<TopicVideoSection>) => {
@@ -279,6 +312,7 @@ export default function VideoGridList({
         keyExtractor={(item) => item.id.toString()}
         renderItem={renderGridItem}
         numColumns={gridColumns}
+        getItemLayout={getGridItemLayout}
         columnWrapperStyle={
           gridColumns > 1
             ? [
@@ -303,10 +337,6 @@ export default function VideoGridList({
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.listContent}
-        // initialNumToRender={8}
-        // maxToRenderPerBatch={8}
-        // windowSize={7}
-        // removeClippedSubviews={!IS_WEB}
       />
     );
   }
@@ -433,12 +463,12 @@ const styles = StyleSheet.create({
     flexDirection: "row-reverse",
   },
   gridItemWrapper: {
-    paddingBottom: 16,
+    paddingBottom: GRID_ITEM_PADDING_BOTTOM,
   },
   webCenteredGridItem: {
     width: "100%",
     alignItems: "center",
-    paddingBottom: 16,
+    paddingBottom: GRID_ITEM_PADDING_BOTTOM,
   },
   itemWrapper: {
     paddingBottom: 8,

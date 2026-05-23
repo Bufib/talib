@@ -1,15 +1,15 @@
 {
   "expo": {
-    "name": "shiacast",
-    "slug": "shiacast",
+    "name": "talib",
+    "slug": "talib",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "shiacast",
+    "scheme": "talib",
     "userInterfaceStyle": "automatic",
     "ios": {
       "icon": "./assets/images/icon.png",
-      "bundleIdentifier": "com.hadi-ea.shiacast",
+      "bundleIdentifier": "com.hadi-ea.talib",
       "supportsTablet": true,
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
@@ -30,7 +30,7 @@
         "foregroundImage": "./assets/images/adaptive-icon.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.hadi_ea.shiacast",
+      "package": "com.hadi_ea.talib",
       "permissions": []
     },
     "web": {
