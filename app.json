@@ -62,7 +62,7 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true,
-      "baseUrl": "/shiacast"
+      "baseUrl": "/"
     },
     "extra": {
       "router": {},
