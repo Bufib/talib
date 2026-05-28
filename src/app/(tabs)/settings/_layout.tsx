@@ -19,6 +19,12 @@ const _layout = () => {
           animation: "default",
         }}
       />
+      <Stack.Screen
+        name="add-video"
+        options={{
+          animation: "default",
+        }}
+      />
     </Stack>
   );
 };

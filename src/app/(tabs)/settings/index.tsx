@@ -8,8 +8,8 @@ import useNotificationStore from "../../../../stores/notificationStore";
 import handleOpenExternalUrl from "../../../../utils/handleOpenExternalUrl";
 import Constants from "expo-constants";
 import { Image } from "expo-image";
-import { router } from "expo-router";
-import React, { useEffect, useState } from "react";
+import { type Href, router } from "expo-router";
+import React, { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Alert,
@@ -30,6 +30,7 @@ import { useScreenFadeIn } from "@/hooks/useScreenFadeIn";
 
 const IS_WEB = Platform.OS === "web";
 const WEB_TAB_BAR_TOP_OFFSET = 80;
+const ADD_VIDEO_ROUTE = "/settings/add-video" as Href;
 
 const Settings = () => {
   const colorScheme = useColorScheme();
@@ -49,6 +50,10 @@ const Settings = () => {
 
   const { fadeAnim, onLayout } = useScreenFadeIn(800);
   const version = Constants.expoConfig?.version;
+  const titleTapCountRef = useRef(0);
+  const titleTapResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
 
   useEffect(() => {
     setIsDarkMode(colorScheme === "dark");
@@ -68,6 +73,34 @@ const Settings = () => {
       mounted = false;
     };
   }, [t]);
+
+  useEffect(() => {
+    return () => {
+      if (titleTapResetTimeoutRef.current) {
+        clearTimeout(titleTapResetTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const handleSettingsTitlePress = () => {
+    if (titleTapResetTimeoutRef.current) {
+      clearTimeout(titleTapResetTimeoutRef.current);
+    }
+
+    titleTapCountRef.current += 1;
+
+    if (titleTapCountRef.current >= 10) {
+      titleTapCountRef.current = 0;
+      titleTapResetTimeoutRef.current = null;
+      router.push(ADD_VIDEO_ROUTE);
+      return;
+    }
+
+    titleTapResetTimeoutRef.current = setTimeout(() => {
+      titleTapCountRef.current = 0;
+      titleTapResetTimeoutRef.current = null;
+    }, 3000);
+  };
 
   const toggleDarkMode = async () => {
     const newDarkMode = !isDarkMode;
@@ -101,15 +134,17 @@ const Settings = () => {
         <View
           style={[styles.header, rtl && styles.rtl, IS_WEB && styles.webHeader]}
         >
-          <ThemedText
-            style={[
-              rtl && { textAlign: "right", paddingRight: 15 },
-              IS_WEB && styles.webScreenTitle,
-            ]}
-            type="title"
-          >
-            {t("settings")}
-          </ThemedText>
+          <Pressable onPress={handleSettingsTitlePress} hitSlop={12}>
+            <ThemedText
+              style={[
+                rtl && { textAlign: "right", paddingRight: 15 },
+                IS_WEB && styles.webScreenTitle,
+              ]}
+              type="title"
+            >
+              {t("settings")}
+            </ThemedText>
+          </Pressable>
         </View>
 
         <ScrollView
