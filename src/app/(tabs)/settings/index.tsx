@@ -250,7 +250,7 @@ const Settings = () => {
               </View>
             </View>
 
-            <Pressable
+            {/* <Pressable
               style={styles.paypalButton}
               onPress={() => payPalLink && handleOpenExternalUrl(payPalLink)}
             >
@@ -258,7 +258,7 @@ const Settings = () => {
                 source={require("@/assets/images/paypal.png")}
                 style={[styles.paypalImage, IS_WEB && styles.webPaypalImage]}
               />
-            </Pressable>
+            </Pressable> */}
 
             {!IS_WEB ? (
               <View style={styles.infoSection}>
