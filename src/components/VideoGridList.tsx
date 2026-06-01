@@ -149,11 +149,6 @@ export default function VideoGridList({
     return thumbnailHeight + WEB_GRID_CARD_CONTENT_HEIGHT;
   }, [gridCardWidth]);
 
-  const webGridRowHeight = useMemo(() => {
-    if (!webGridCardMinHeight) return undefined;
-    return webGridCardMinHeight + GRID_ITEM_PADDING_BOTTOM;
-  }, [webGridCardMinHeight]);
-
   const renderGridItem = useCallback(
     ({ item }: ListRenderItemInfo<VideoType>) => {
       const isWebCentered = IS_WEB && gridColumns === 1;
@@ -187,39 +182,26 @@ export default function VideoGridList({
     [gridCardWidth, gridColumns, lang, rtl, webGridCardMinHeight],
   );
 
-  const getGridItemLayout = useMemo(() => {
-    if (!IS_WEB || !webGridRowHeight || gridColumns !== 1) return undefined;
-    return (_: ArrayLike<VideoType> | null | undefined, index: number) => ({
-      length: webGridRowHeight,
-      offset: webGridRowHeight * index,
+  const getTopicItemLayout = useCallback(
+    (_data: ArrayLike<VideoType> | null | undefined, index: number) => ({
+      length: topicCardWidth,
+      offset: (topicCardWidth + ROW_CARD_GAP) * index,
       index,
-    });
-  }, [gridColumns, webGridRowHeight]);
+    }),
+    [topicCardWidth],
+  );
+
+  const renderVideo = useCallback(
+    ({ item }: ListRenderItemInfo<VideoType>) => (
+      <View style={styles.itemWrapper}>
+        <VideoGridCard video={item} width={topicCardWidth} rtl={rtl} lang={lang} />
+      </View>
+    ),
+    [lang, rtl, topicCardWidth],
+  );
 
   const renderSection = useCallback(
     ({ item: section }: ListRenderItemInfo<TopicVideoSection>) => {
-      const getTopicItemLayout = (
-        _data: ArrayLike<VideoType> | null | undefined,
-        index: number,
-      ) => ({
-        length: topicCardWidth,
-        offset: (topicCardWidth + ROW_CARD_GAP) * index,
-        index,
-      });
-
-      const renderVideo = ({ item }: ListRenderItemInfo<VideoType>) => {
-        return (
-          <View style={styles.itemWrapper}>
-            <VideoGridCard
-              video={item}
-              width={topicCardWidth}
-              rtl={rtl}
-              lang={lang}
-            />
-          </View>
-        );
-      };
-
       return (
         <View style={[styles.topicSection, IS_WEB && styles.webTopicSection]}>
           <View
@@ -297,9 +279,9 @@ export default function VideoGridList({
       colors.backgroundElement,
       colors.tabIconDefault,
       colors.text,
-      lang,
       rtl,
-      topicCardWidth,
+      getTopicItemLayout,
+      renderVideo,
     ],
   );
 
@@ -312,7 +294,6 @@ export default function VideoGridList({
         keyExtractor={(item) => item.id.toString()}
         renderItem={renderGridItem}
         numColumns={gridColumns}
-        getItemLayout={getGridItemLayout}
         columnWrapperStyle={
           gridColumns > 1
             ? [
