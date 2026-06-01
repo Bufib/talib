@@ -134,6 +134,13 @@ const YoutubeVideoPlayer = forwardRef<
   const hostRef = useRef<HTMLDivElement | null>(null);
   const playerRef = useRef<YoutubeApiPlayer | null>(null);
   const playRef = useRef(play);
+  // Callbacks/Props in Refs halten, damit der Player-Effekt nur von videoId
+  // und playerVars abhaengt und das iframe nicht bei jeder neuen
+  // Callback-Identitaet komplett neu aufgebaut wird.
+  const onChangeStateRef = useRef(onChangeState);
+  const onErrorRef = useRef(onError);
+  const onReadyRef = useRef(onReady);
+  const autoFullscreenRef = useRef(autoFullscreen);
 
   const requestFullscreen = useCallback(async () => {
     const target = fullscreenRef.current as FullscreenElement | null;
@@ -187,6 +194,13 @@ const YoutubeVideoPlayer = forwardRef<
   useEffect(() => {
     playRef.current = play;
   }, [play]);
+
+  useEffect(() => {
+    onChangeStateRef.current = onChangeState;
+    onErrorRef.current = onError;
+    onReadyRef.current = onReady;
+    autoFullscreenRef.current = autoFullscreen;
+  });
 
   const playerVars = useMemo<YoutubePlayerVars>(() => {
     return {
@@ -248,19 +262,19 @@ const YoutubeVideoPlayer = forwardRef<
         events: {
           onReady: () => {
             configureIframe();
-            onReady?.();
+            onReadyRef.current?.();
             if (playRef.current) {
               playerRef.current?.playVideo?.();
             }
-            if (autoFullscreen) {
+            if (autoFullscreenRef.current) {
               void requestFullscreen();
             }
           },
           onStateChange: (event) => {
-            onChangeState?.(mapPlayerState(event.data));
+            onChangeStateRef.current?.(mapPlayerState(event.data));
           },
           onError: () => {
-            onError?.();
+            onErrorRef.current?.();
           },
         },
       });
@@ -272,16 +286,7 @@ const YoutubeVideoPlayer = forwardRef<
       playerRef.current = null;
       host.replaceChildren();
     };
-  }, [
-    autoFullscreen,
-    configureIframe,
-    onChangeState,
-    onError,
-    onReady,
-    playerVars,
-    requestFullscreen,
-    videoId,
-  ]);
+  }, [configureIframe, playerVars, requestFullscreen, videoId]);
 
   useEffect(() => {
     if (play) {
