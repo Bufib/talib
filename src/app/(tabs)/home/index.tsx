@@ -38,7 +38,6 @@ if (
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
-const PAGE_SIZE = 20;
 const IS_WEB = Platform.OS === "web";
 const SEARCH_ICON_SIZE = IS_WEB ? 16 : 18;
 const HEADER_ICON_SIZE = IS_WEB ? 22 : 27;
@@ -86,9 +85,6 @@ export default function HomeScreen() {
     isLoading: videosLoading,
     isError: videosError,
     error: videosErrorObj,
-    fetchNextPage: videosFetchNextPage,
-    hasNextPage: videosHasNextPage,
-    isFetchingNextPage: videosIsFetchingNextPage,
     refetch: videosRefetch,
     isRefetching: videosIsRefetching,
     isFetching: videosIsFetching,
@@ -97,7 +93,6 @@ export default function HomeScreen() {
     selectedTopic,
     selectedAuthor,
     searchQuery: debouncedSearchQuery,
-    pageSize: PAGE_SIZE,
   });
 
   useEffect(() => {
@@ -109,14 +104,13 @@ export default function HomeScreen() {
   }, [videosIsRefetching]);
 
   useEffect(() => {
-    const isBusyFetching =
-      videosIsFetching && !videosIsFetchingNextPage && !videosLoading;
+    const isBusyFetching = videosIsFetching && !videosLoading;
     Animated.timing(listOpacity, {
       toValue: isBusyFetching ? 0.4 : 1,
       duration: isBusyFetching ? 120 : 280,
       useNativeDriver: true,
     }).start();
-  }, [videosIsFetching, videosIsFetchingNextPage, videosLoading, listOpacity]);
+  }, [videosIsFetching, videosLoading, listOpacity]);
 
   useEffect(() => {
     if (!searchVisible) return;
@@ -521,16 +515,6 @@ export default function HomeScreen() {
             onRefresh={() => {
               setIsManualRefreshing(true);
               videosRefetch();
-            }}
-            isLoadingMore={videosIsFetchingNextPage}
-            onEndReached={() => {
-              if (
-                videosHasNextPage &&
-                !videosIsFetchingNextPage &&
-                !videosLoading
-              ) {
-                videosFetchNextPage();
-              }
             }}
           />
         </Animated.View>

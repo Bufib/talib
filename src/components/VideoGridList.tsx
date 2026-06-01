@@ -1,11 +1,10 @@
 import VideoGridCard from "@/components/VideoGridCard";
-import { LoadingIndicator } from "@/components/LoadingIndicator";
 import { Colors } from "@/constants/Colors";
 import type { VideoType } from "@/constants/Types";
 import { useColorScheme } from "@/hooks/useColorScheme";
 import { useLanguage } from "../../contexts/LanguageContext";
 import { parseTopics } from "../../utils/videoTopics";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import {
   FlatList,
@@ -47,8 +46,6 @@ type VideoGridListProps = {
   ListEmptyComponent?: FlatListProps<VideoType>["ListEmptyComponent"];
   refreshing?: boolean;
   onRefresh?: () => void;
-  isLoadingMore?: boolean;
-  onEndReached?: () => void;
 };
 
 export default function VideoGridList({
@@ -59,8 +56,6 @@ export default function VideoGridList({
   ListEmptyComponent,
   refreshing = false,
   onRefresh,
-  isLoadingMore = false,
-  onEndReached,
 }: VideoGridListProps) {
   const { width } = useWindowDimensions();
   const { lang, rtl } = useLanguage();
@@ -108,7 +103,7 @@ export default function VideoGridList({
 
   const uncategorizedTitle = t("uncategorizedTopic");
 
-  const groupedTopicSections = useMemo<TopicVideoSection[]>(() => {
+  const topicSections = useMemo<TopicVideoSection[]>(() => {
     const sectionsByKey = new Map<string, TopicVideoSection>();
 
     for (const video of videos) {
@@ -139,47 +134,14 @@ export default function VideoGridList({
       }
     }
 
-    return Array.from(sectionsByKey.values());
-  }, [uncategorizedTitle, videos]);
-
-  const compareTopicSections = useCallback(
-    (a: TopicVideoSection, b: TopicVideoSection) => {
+    return Array.from(sectionsByKey.values()).sort((a, b) => {
       if (a.isUncategorized !== b.isUncategorized) {
         return a.isUncategorized ? 1 : -1;
       }
 
       return a.title.localeCompare(b.title, lang, { sensitivity: "base" });
-    },
-    [lang],
-  );
-
-  const [topicSectionOrder, setTopicSectionOrder] = useState<string[]>([]);
-
-  const topicSections = useMemo(() => {
-    const sectionsByKey = new Map(
-      groupedTopicSections.map((section) => [section.key, section]),
-    );
-    const knownKeys = new Set(topicSectionOrder);
-    const retainedSections = topicSectionOrder
-      .map((key) => sectionsByKey.get(key))
-      .filter((section): section is TopicVideoSection => Boolean(section));
-    const appendedSections = groupedTopicSections
-      .filter((section) => !knownKeys.has(section.key))
-      .sort(compareTopicSections);
-
-    return [...retainedSections, ...appendedSections];
-  }, [compareTopicSections, groupedTopicSections, topicSectionOrder]);
-
-  useEffect(() => {
-    setTopicSectionOrder((currentOrder) => {
-      const nextOrder = topicSections.map((section) => section.key);
-      const isUnchanged =
-        currentOrder.length === nextOrder.length &&
-        currentOrder.every((key, index) => key === nextOrder[index]);
-
-      return isUnchanged ? currentOrder : nextOrder;
     });
-  }, [topicSections]);
+  }, [lang, uncategorizedTitle, videos]);
 
   // Stabile Card-Hoehe auf Web, damit FlatList beim Schnellscrollen
   // keine variierenden Item-Hoehen schaetzen muss (Author-Row ist konditional).
@@ -344,17 +306,8 @@ export default function VideoGridList({
         }
         refreshing={refreshing}
         onRefresh={onRefresh}
-        onEndReached={onEndReached}
-        onEndReachedThreshold={0.4}
         ListHeaderComponent={ListHeaderComponent}
         ListEmptyComponent={ListEmptyComponent}
-        ListFooterComponent={
-          isLoadingMore ? (
-            <View style={styles.footerLoader}>
-              <LoadingIndicator size="small" />
-            </View>
-          ) : null
-        }
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.listContent}
@@ -371,17 +324,8 @@ export default function VideoGridList({
       renderItem={renderSection}
       refreshing={refreshing}
       onRefresh={onRefresh}
-      onEndReached={onEndReached}
-      onEndReachedThreshold={0.4}
       ListHeaderComponent={ListHeaderComponent}
       ListEmptyComponent={ListEmptyComponent}
-      ListFooterComponent={
-        isLoadingMore ? (
-          <View style={styles.footerLoader}>
-            <LoadingIndicator size="small" />
-          </View>
-        ) : null
-      }
       keyboardShouldPersistTaps="handled"
       showsVerticalScrollIndicator={false}
       contentContainerStyle={styles.listContent}
@@ -495,9 +439,5 @@ const styles = StyleSheet.create({
   },
   cardSeparator: {
     width: ROW_CARD_GAP,
-  },
-  footerLoader: {
-    paddingVertical: 16,
-    alignItems: "center",
   },
 });

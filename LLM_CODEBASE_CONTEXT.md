@@ -169,17 +169,13 @@ Server data hooks
 -----------------
 useVideoList:
 - File: src/hooks/useVideoList.ts
-- Infinite React Query for the home video list.
-- Query key starts with ["videos", "grid", ...].
+- React Query for the complete home video metadata list.
+- Query key ["videos", "grid"].
 - Reads from public.videos with select("*").
 - Orders by created_at desc and id desc.
-- Server-side filters:
-  - language_code eq language, when language is not null
-  - author_name eq selectedAuthor
-  - title ilike search query
-- Topic filtering is client-side using matchesTopic because video_topic may
-  contain comma-separated or JSON-like values.
-- Dedupe by video id across pages.
+- Filters language, author, title search and topic client-side.
+- Topic filtering uses matchesTopic because video_topic may contain
+  comma-separated or JSON-like values.
 - Uses long stale/gc times and disables refetch on window focus.
 
 useVideoById:
@@ -302,14 +298,11 @@ VideoGridList:
   - gridColumns
   - ListHeaderComponent, ListEmptyComponent
   - refreshing, onRefresh
-  - isLoadingMore, onEndReached
 - topicRows mode:
   - Groups videos by parsed video_topic.
   - Each topic is a vertical section with a horizontal FlatList of cards.
   - Uncategorized videos are grouped under translated "uncategorizedTopic".
-  - Initially sorts topic sections alphabetically, uncategorized last.
-  - Keeps visible topic sections stable during pagination and appends newly
-    discovered topics at the bottom so the vertical list does not jump.
+  - Sorts topic sections alphabetically, uncategorized last.
 - grid mode:
   - Vertical FlatList.
   - Can use one or more columns.
@@ -515,12 +508,9 @@ Design and UI conventions in this app
 
 Known implementation details and caveats
 ----------------------------------------
-- Topic filtering in useVideoList is client-side after a page is fetched. If a
-  selected topic is sparse, pagination may not fill the UI with pageSize items
-  even though more matching items may exist later. Improving this would require
-  a server-side schema/query change, e.g. normalized topic table or RPC.
-- useVideoFilters has a better dependent topic-author filter only in fallback
-  mode because RPCs return independent distinct lists.
+- useVideoList intentionally loads all video metadata in one request because
+  the current dataset is small. Revisit this if the collection grows to
+  thousands of videos or reaches the Supabase API row limit.
 - The README is mostly Expo starter text and not a reliable project
   architecture guide. Prefer this file for LLM context.
 - Expo typed routes are enabled. After adding/removing routes, Expo may need to
