@@ -1,10 +1,10 @@
 import { Colors } from "@/constants/Colors";
+import { LoadingIndicator } from "@/components/LoadingIndicator";
 import { useColorScheme } from "@/hooks/useColorScheme";
 import { useVideoFilters } from "@/hooks/useVideoFilters";
-import { useVideoLanguages } from "@/hooks/useVideoLanguages";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
-import React, { useCallback, useEffect, useMemo } from "react";
+import React, { useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import {
   ScrollView,
@@ -39,8 +39,12 @@ export default function FilterModal() {
   const selectedLanguage =
     storeDefaultLanguage === null ? lang : selectedLanguageValue;
 
-  const { languages } = useVideoLanguages();
-  const { availableTopics, availableAuthors } = useVideoFilters({
+  const {
+    availableTopics,
+    availableAuthors,
+    availableLanguages,
+    isLoading,
+  } = useVideoFilters({
     language: selectedLanguage,
     selectedTopic,
     selectedAuthor,
@@ -53,10 +57,6 @@ export default function FilterModal() {
   const closeSheet = useCallback(() => {
     router.dismiss();
   }, []);
-
-  const languageOptions = useMemo(() => {
-    return [...new Set([lang, ...languages])].sort();
-  }, [lang, languages]);
 
   const hasActiveFilters =
     selectedTopic !== null ||
@@ -108,186 +108,215 @@ export default function FilterModal() {
           { paddingBottom: insets.bottom + 16 },
         ]}
       >
-        {availableTopics.length > 0 && (
-          <View style={styles.section}>
-            <Text style={[styles.sectionLabel, { color: sectionLabelColor }]}>
-              {t("topics").toUpperCase()}
-            </Text>
-            <View style={styles.chipsWrap}>
-              <TouchableOpacity
-                style={[
-                  styles.chip,
-                  { backgroundColor: chipBg, borderColor: chipBorder },
-                  !selectedTopic && {
-                    backgroundColor: activeBg,
-                    borderColor: activeBg,
-                  },
-                ]}
-                onPress={() => setSelectedTopic(null)}
-              >
-                <Text
-                  style={[
-                    styles.chipText,
-                    { color: isDark ? "#ccd6e0" : "#444" },
-                    !selectedTopic && styles.chipTextActive,
-                  ]}
-                >
-                  {t("allTopics")}
-                </Text>
-              </TouchableOpacity>
-              {availableTopics.map((topic) => (
-                <TouchableOpacity
-                  key={topic}
-                  style={[
-                    styles.chip,
-                    { backgroundColor: chipBg, borderColor: chipBorder },
-                    selectedTopic === topic && {
-                      backgroundColor: activeBg,
-                      borderColor: activeBg,
-                    },
-                  ]}
-                  onPress={() =>
-                    setSelectedTopic(selectedTopic === topic ? null : topic)
-                  }
-                >
-                  <Text
-                    style={[
-                      styles.chipText,
-                      { color: isDark ? "#ccd6e0" : "#444" },
-                      selectedTopic === topic && styles.chipTextActive,
-                    ]}
-                  >
-                    {topic}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
+        {isLoading ? (
+          <View style={styles.loadingContainer}>
+            <LoadingIndicator size="small" />
           </View>
-        )}
-
-        {availableAuthors.length > 0 && (
-          <View style={styles.section}>
-            <Text style={[styles.sectionLabel, { color: sectionLabelColor }]}>
-              {t("authors").toUpperCase()}
-            </Text>
-            <View style={styles.chipsWrap}>
-              <TouchableOpacity
-                style={[
-                  styles.chip,
-                  { backgroundColor: chipBg, borderColor: chipBorder },
-                  !selectedAuthor && {
-                    backgroundColor: activeBg,
-                    borderColor: activeBg,
-                  },
-                ]}
-                onPress={() => setSelectedAuthor(null)}
-              >
+        ) : (
+          <>
+            {availableTopics.length > 0 && (
+              <View style={styles.section}>
                 <Text
-                  style={[
-                    styles.chipText,
-                    { color: isDark ? "#ccd6e0" : "#444" },
-                    !selectedAuthor && styles.chipTextActive,
-                  ]}
+                  style={[styles.sectionLabel, { color: sectionLabelColor }]}
                 >
-                  {t("allAuthors")}
+                  {t("topics").toUpperCase()}
                 </Text>
-              </TouchableOpacity>
-              {availableAuthors.map((author) => (
-                <TouchableOpacity
-                  key={author}
-                  style={[
-                    styles.chip,
-                    { backgroundColor: chipBg, borderColor: chipBorder },
-                    selectedAuthor === author && {
-                      backgroundColor: activeBg,
-                      borderColor: activeBg,
-                    },
-                  ]}
-                  onPress={() =>
-                    setSelectedAuthor(selectedAuthor === author ? null : author)
-                  }
-                >
-                  <Text
+                <View style={styles.chipsWrap}>
+                  <TouchableOpacity
                     style={[
-                      styles.chipText,
-                      { color: isDark ? "#ccd6e0" : "#444" },
-                      selectedAuthor === author && styles.chipTextActive,
+                      styles.chip,
+                      { backgroundColor: chipBg, borderColor: chipBorder },
+                      !selectedTopic && {
+                        backgroundColor: activeBg,
+                        borderColor: activeBg,
+                      },
                     ]}
+                    onPress={() => setSelectedTopic(null)}
                   >
-                    {author}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
-        )}
+                    <Text
+                      style={[
+                        styles.chipText,
+                        { color: isDark ? "#ccd6e0" : "#444" },
+                        !selectedTopic && styles.chipTextActive,
+                      ]}
+                    >
+                      {t("allTopics")}
+                    </Text>
+                  </TouchableOpacity>
+                  {availableTopics.map((topic) => (
+                    <TouchableOpacity
+                      key={topic}
+                      style={[
+                        styles.chip,
+                        { backgroundColor: chipBg, borderColor: chipBorder },
+                        selectedTopic === topic && {
+                          backgroundColor: activeBg,
+                          borderColor: activeBg,
+                        },
+                      ]}
+                      onPress={() =>
+                        setSelectedTopic(selectedTopic === topic ? null : topic)
+                      }
+                    >
+                      <Text
+                        style={[
+                          styles.chipText,
+                          { color: isDark ? "#ccd6e0" : "#444" },
+                          selectedTopic === topic && styles.chipTextActive,
+                        ]}
+                      >
+                        {topic}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+            )}
 
-        <View style={styles.section}>
-          <Text style={[styles.sectionLabel, { color: sectionLabelColor }]}>
-            {t("language").toUpperCase()}
-          </Text>
-          <View style={styles.chipsWrap}>
-            <TouchableOpacity
-              style={[
-                styles.chip,
-                { backgroundColor: chipBg, borderColor: chipBorder },
-                selectedLanguage === null && {
-                  backgroundColor: activeBg,
-                  borderColor: activeBg,
-                },
-              ]}
-              onPress={() => setSelectedLanguage(null)}
-            >
-              <Text
-                style={[
-                  styles.chipText,
-                  { color: isDark ? "#ccd6e0" : "#444" },
-                  selectedLanguage === null && styles.chipTextActive,
-                ]}
-              >
-                {t("allLanguages")}
+            {availableAuthors.length > 0 && (
+              <View style={styles.section}>
+                <Text
+                  style={[styles.sectionLabel, { color: sectionLabelColor }]}
+                >
+                  {t("authors").toUpperCase()}
+                </Text>
+                <View style={styles.chipsWrap}>
+                  <TouchableOpacity
+                    style={[
+                      styles.chip,
+                      { backgroundColor: chipBg, borderColor: chipBorder },
+                      !selectedAuthor && {
+                        backgroundColor: activeBg,
+                        borderColor: activeBg,
+                      },
+                    ]}
+                    onPress={() => setSelectedAuthor(null)}
+                  >
+                    <Text
+                      style={[
+                        styles.chipText,
+                        { color: isDark ? "#ccd6e0" : "#444" },
+                        !selectedAuthor && styles.chipTextActive,
+                      ]}
+                    >
+                      {t("allAuthors")}
+                    </Text>
+                  </TouchableOpacity>
+                  {availableAuthors.map((author) => (
+                    <TouchableOpacity
+                      key={author}
+                      style={[
+                        styles.chip,
+                        { backgroundColor: chipBg, borderColor: chipBorder },
+                        selectedAuthor === author && {
+                          backgroundColor: activeBg,
+                          borderColor: activeBg,
+                        },
+                      ]}
+                      onPress={() =>
+                        setSelectedAuthor(
+                          selectedAuthor === author ? null : author,
+                        )
+                      }
+                    >
+                      <Text
+                        style={[
+                          styles.chipText,
+                          { color: isDark ? "#ccd6e0" : "#444" },
+                          selectedAuthor === author && styles.chipTextActive,
+                        ]}
+                      >
+                        {author}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+            )}
+
+            <View style={styles.section}>
+              <Text style={[styles.sectionLabel, { color: sectionLabelColor }]}>
+                {t("language").toUpperCase()}
               </Text>
-            </TouchableOpacity>
-            {languageOptions.map((language) => (
-              <TouchableOpacity
-                key={language}
-                style={[
-                  styles.chip,
-                  { backgroundColor: chipBg, borderColor: chipBorder },
-                  selectedLanguage === language && {
-                    backgroundColor: activeBg,
-                    borderColor: activeBg,
-                  },
-                ]}
-                onPress={() => setSelectedLanguage(language)}
-              >
-                <Text
+              <View style={styles.chipsWrap}>
+                <TouchableOpacity
                   style={[
-                    styles.chipText,
-                    { color: isDark ? "#ccd6e0" : "#444" },
-                    selectedLanguage === language && styles.chipTextActive,
+                    styles.chip,
+                    { backgroundColor: chipBg, borderColor: chipBorder },
+                    selectedLanguage === null && {
+                      backgroundColor: activeBg,
+                      borderColor: activeBg,
+                    },
                   ]}
+                  onPress={() => setSelectedLanguage(null)}
                 >
-                  {getLanguageLabel(language)}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </View>
+                  <Text
+                    style={[
+                      styles.chipText,
+                      { color: isDark ? "#ccd6e0" : "#444" },
+                      selectedLanguage === null && styles.chipTextActive,
+                    ]}
+                  >
+                    {t("allLanguages")}
+                  </Text>
+                </TouchableOpacity>
+                {availableLanguages.map((language) => (
+                  <TouchableOpacity
+                    key={language}
+                    style={[
+                      styles.chip,
+                      { backgroundColor: chipBg, borderColor: chipBorder },
+                      selectedLanguage === language && {
+                        backgroundColor: activeBg,
+                        borderColor: activeBg,
+                      },
+                    ]}
+                    onPress={() => setSelectedLanguage(language)}
+                  >
+                    <Text
+                      style={[
+                        styles.chipText,
+                        { color: isDark ? "#ccd6e0" : "#444" },
+                        selectedLanguage === language && styles.chipTextActive,
+                      ]}
+                    >
+                      {getLanguageLabel(language)}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
 
-        {hasActiveFilters && (
-          <TouchableOpacity
-            style={styles.clearBtn}
-            onPress={() => resetFilters(lang)}
-          >
-            <Ionicons
-              name="refresh-outline"
-              size={15}
-              color={Colors.universal.primary}
-              style={{ marginRight: 6 }}
-            />
-            <Text style={styles.clearBtnText}>{t("resetFilters")}</Text>
-          </TouchableOpacity>
+            <View style={styles.actionsRow}>
+              {hasActiveFilters && (
+                <TouchableOpacity
+                  style={[styles.actionBtn, styles.clearBtn]}
+                  onPress={() => resetFilters(lang)}
+                >
+                  <Ionicons
+                    name="refresh-outline"
+                    size={15}
+                    color={Colors.universal.primary}
+                    style={{ marginRight: 6 }}
+                  />
+                  <Text style={styles.clearBtnText}>{t("resetFilters")}</Text>
+                </TouchableOpacity>
+              )}
+
+              <TouchableOpacity
+                style={[styles.actionBtn, styles.applyBtn]}
+                onPress={closeSheet}
+              >
+                <Ionicons
+                  name="checkmark"
+                  size={16}
+                  color="#fff"
+                  style={{ marginRight: 6 }}
+                />
+                <Text style={styles.applyBtnText}>{t("applyFilters")}</Text>
+              </TouchableOpacity>
+            </View>
+          </>
         )}
       </ScrollView>
     </View>
@@ -329,6 +358,11 @@ const styles = StyleSheet.create({
     paddingTop: 20,
     gap: 24,
   },
+  loadingContainer: {
+    minHeight: 180,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   section: {
     gap: 12,
   },
@@ -356,18 +390,33 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontWeight: "600",
   },
-  clearBtn: {
+  actionsRow: {
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 8,
+  },
+  actionBtn: {
+    flex: 1,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     paddingVertical: 12,
     borderRadius: 12,
+  },
+  clearBtn: {
     borderWidth: 1.5,
     borderColor: Colors.universal.primary,
-    marginTop: 8,
   },
   clearBtnText: {
     color: Colors.universal.primary,
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  applyBtn: {
+    backgroundColor: Colors.universal.primary,
+  },
+  applyBtnText: {
+    color: "#fff",
     fontSize: 14,
     fontWeight: "600",
   },

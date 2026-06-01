@@ -23,6 +23,7 @@ const ar = {
   authors: "المؤلفون",
   filter: "تصفية",
   resetFilters: "إعادة تعيين التصفية",
+  applyFilters: "تطبيق",
 
   // General
   today: "اليوم",

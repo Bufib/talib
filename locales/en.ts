@@ -23,6 +23,7 @@ const en = {
   authors: "Authors",
   filter: "Filter",
   resetFilters: "Reset filters",
+  applyFilters: "Apply",
 
   // General
   today: "Today",

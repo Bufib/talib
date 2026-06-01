@@ -217,7 +217,7 @@ export default function RenderFavoriteVideos() {
     );
   }
 
-  if (allFavoriteIds.length === 0) {
+  if (allFavoriteIds.length === 0 && !isLoading) {
     return (
       <ThemedView style={styles.centeredContainer}>
         <ThemedText style={styles.emptyText}>{t("noFavorites")}</ThemedText>

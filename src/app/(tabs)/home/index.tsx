@@ -469,7 +469,7 @@ export default function HomeScreen() {
     return (
       <View style={styles.emptyContainer}>
         <ThemedText style={styles.emptyText} type="subtitle">
-          {hasActiveSearch || activeFilterCount > 0
+          {hasActiveSearch || activeFilterCount > 0 && !videosLoading
             ? t("noSearchResult")
             : t("videosEmpty")}
         </ThemedText>

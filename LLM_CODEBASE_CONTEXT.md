@@ -195,14 +195,10 @@ useVideosByIdsForFavorites:
 
 useVideoFilters:
 - File: src/hooks/useVideoFilters.ts
-- Loads topics/authors for FilterModal.
-- Preferred fast path: Supabase RPCs video_distinct_topics and
-  video_distinct_authors.
-- If RPCs are missing, falls back to selecting video_topic and author_name from
-  public.videos and computes distinct data client-side.
-- In RPC mode it cannot precisely constrain topic-author combinations, so it
-  shows all topics/authors. In fallback mode it has pair data and can constrain
-  available options based on the other selected filter.
+- Loads language/topic/author metadata for FilterModal.
+- Selects language_code, video_topic and author_name from public.videos.
+- Computes dependent facets client-side: available topics are constrained by
+  language/author, authors by language/topic and languages by topic/author.
 
 useVideoLanguages:
 - File: src/hooks/useVideoLanguages.ts
@@ -265,7 +261,8 @@ Filter state:
   - selectedLanguage
 - setDefaultLanguage synchronizes selectedLanguage with app language when the
   user has not intentionally selected another language.
-- setSelectedLanguage resets topic and author.
+- setSelectedLanguage preserves topic and author because FilterModal only
+  exposes compatible language options.
 - resetFilters(defaultLanguage) clears topic/author and returns language to the
   default app language.
 
@@ -310,7 +307,9 @@ VideoGridList:
   - Groups videos by parsed video_topic.
   - Each topic is a vertical section with a horizontal FlatList of cards.
   - Uncategorized videos are grouped under translated "uncategorizedTopic".
-  - Topic sections are sorted alphabetically, uncategorized last.
+  - Initially sorts topic sections alphabetically, uncategorized last.
+  - Keeps visible topic sections stable during pagination and appends newly
+    discovered topics at the bottom so the vertical list does not jump.
 - grid mode:
   - Vertical FlatList.
   - Can use one or more columns.
@@ -588,4 +587,3 @@ Current key files by responsibility
 - Settings: src/app/(tabs)/settings/index.tsx
 - Force update: src/components/ForceUpdateGate.tsx
 - App review: src/components/AppReviewPrompt.tsx
-

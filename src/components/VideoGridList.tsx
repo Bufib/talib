@@ -5,7 +5,7 @@ import type { VideoType } from "@/constants/Types";
 import { useColorScheme } from "@/hooks/useColorScheme";
 import { useLanguage } from "../../contexts/LanguageContext";
 import { parseTopics } from "../../utils/videoTopics";
-import React, { useCallback, useMemo } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   FlatList,
@@ -92,8 +92,15 @@ export default function VideoGridList({
     );
 
     // Auf Web einspaltige Karten begrenzen, damit sie nicht uebergross wirken.
+    // Auf kleinen Screens dieselbe kompakte Breite wie in den Topic-Reihen
+    // verwenden, statt fast die komplette Viewport-Breite zu fuellen.
     if (IS_WEB && gridColumns === 1) {
-      return Math.min(computed, WEB_SINGLE_CARD_MAX);
+      const singleCardMax =
+        layoutWidth >= 640
+          ? WEB_SINGLE_CARD_MAX
+          : Math.max(260, Math.round(availableWidth * 0.82));
+
+      return Math.min(computed, singleCardMax);
     }
 
     return computed;
@@ -101,7 +108,7 @@ export default function VideoGridList({
 
   const uncategorizedTitle = t("uncategorizedTopic");
 
-  const topicSections = useMemo<TopicVideoSection[]>(() => {
+  const groupedTopicSections = useMemo<TopicVideoSection[]>(() => {
     const sectionsByKey = new Map<string, TopicVideoSection>();
 
     for (const video of videos) {
@@ -132,14 +139,47 @@ export default function VideoGridList({
       }
     }
 
-    return Array.from(sectionsByKey.values()).sort((a, b) => {
+    return Array.from(sectionsByKey.values());
+  }, [uncategorizedTitle, videos]);
+
+  const compareTopicSections = useCallback(
+    (a: TopicVideoSection, b: TopicVideoSection) => {
       if (a.isUncategorized !== b.isUncategorized) {
         return a.isUncategorized ? 1 : -1;
       }
 
       return a.title.localeCompare(b.title, lang, { sensitivity: "base" });
+    },
+    [lang],
+  );
+
+  const [topicSectionOrder, setTopicSectionOrder] = useState<string[]>([]);
+
+  const topicSections = useMemo(() => {
+    const sectionsByKey = new Map(
+      groupedTopicSections.map((section) => [section.key, section]),
+    );
+    const knownKeys = new Set(topicSectionOrder);
+    const retainedSections = topicSectionOrder
+      .map((key) => sectionsByKey.get(key))
+      .filter((section): section is TopicVideoSection => Boolean(section));
+    const appendedSections = groupedTopicSections
+      .filter((section) => !knownKeys.has(section.key))
+      .sort(compareTopicSections);
+
+    return [...retainedSections, ...appendedSections];
+  }, [compareTopicSections, groupedTopicSections, topicSectionOrder]);
+
+  useEffect(() => {
+    setTopicSectionOrder((currentOrder) => {
+      const nextOrder = topicSections.map((section) => section.key);
+      const isUnchanged =
+        currentOrder.length === nextOrder.length &&
+        currentOrder.every((key, index) => key === nextOrder[index]);
+
+      return isUnchanged ? currentOrder : nextOrder;
     });
-  }, [lang, uncategorizedTitle, videos]);
+  }, [topicSections]);
 
   // Stabile Card-Hoehe auf Web, damit FlatList beim Schnellscrollen
   // keine variierenden Item-Hoehen schaetzen muss (Author-Row ist konditional).

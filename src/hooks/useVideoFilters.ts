@@ -10,99 +10,43 @@ type UseVideoFiltersArgs = {
   selectedAuthor: string | null;
 };
 
-type FilterPair = { topic: string | null; author: string | null };
+type FilterPair = {
+  language: string | null;
+  topic: string | null;
+  author: string | null;
+};
 
-// ---------------------------------------------------------------------------
-// RPC-Pfad: schnell, weil Postgres-side distinct.
-// ---------------------------------------------------------------------------
+const EMPTY_FILTER_PAIRS: FilterPair[] = [];
 
-async function fetchTopicsRpc(lang: string | null): Promise<string[] | null> {
-  const { data, error } = await supabase.rpc("video_distinct_topics", {
-    p_lang: lang,
-  });
-
-  if (error) {
-    if (error.code === "PGRST202" || error.code === "42883") return null;
-    throw error;
-  }
-  return ((data ?? []) as { topic: string }[]).map((r) => r.topic);
-}
-
-async function fetchAuthorsRpc(lang: string | null): Promise<string[] | null> {
-  const { data, error } = await supabase.rpc("video_distinct_authors", {
-    p_lang: lang,
-  });
-
-  if (error) {
-    if (error.code === "PGRST202" || error.code === "42883") return null;
-    throw error;
-  }
-  return ((data ?? []) as { author: string }[]).map((r) => r.author);
-}
-
-// ---------------------------------------------------------------------------
-// Fallback: SELECT auf alle Rows, distinct im Client. Nötig, wenn die RPCs
-// noch nicht deployed sind oder Topic/Author voneinander abhängen.
-// ---------------------------------------------------------------------------
-
-async function fetchFilterPairsFallback(
-  lang: string | null,
-): Promise<FilterPair[]> {
-  let request = supabase
+// Die kombinierten Metadaten werden benoetigt, damit Thema, Autor und Sprache
+// als voneinander abhaengige Facetten gefiltert werden koennen.
+async function fetchFilterPairs(): Promise<FilterPair[]> {
+  const { data, error } = await supabase
     .from("videos")
-    .select("video_topic, author_name");
+    .select("language_code, video_topic, author_name");
 
-  if (lang !== null) request = request.eq("language_code", lang);
-
-  const { data, error } = await request;
   if (error) throw error;
 
   type Row = {
+    language_code: string | null;
     video_topic: unknown;
     author_name: string | null;
   };
 
   return ((data ?? []) as unknown as Row[]).flatMap((row): FilterPair[] => {
     const topics = parseTopics(row.video_topic);
+    const language = row.language_code?.trim() || null;
     const author = row.author_name ?? null;
 
-    if (topics.length === 0) return [{ topic: null, author }];
-    return topics.map((topic) => ({ topic, author }));
+    if (topics.length === 0) return [{ language, topic: null, author }];
+    return topics.map((topic) => ({ language, topic, author }));
   });
 }
 
-type FilterData = {
-  topics: string[];
-  authors: string[];
-  // Nur befüllt im Fallback-Pfad (für abhängige Filter).
-  pairs: FilterPair[] | null;
-};
-
-async function fetchFilterData(lang: string | null): Promise<FilterData> {
-  const [topics, authors] = await Promise.all([
-    fetchTopicsRpc(lang),
-    fetchAuthorsRpc(lang),
-  ]);
-
-  if (topics !== null && authors !== null) {
-    return { topics, authors, pairs: null };
-  }
-
-  // RPCs (noch) nicht da → Fallback.
-  const pairs = await fetchFilterPairsFallback(lang);
-
-  const topicSet = new Set<string>();
-  const authorSet = new Set<string>();
-  for (const pair of pairs) {
-    if (pair.topic) topicSet.add(pair.topic);
-    if (pair.author) authorSet.add(pair.author);
-  }
-
-  return {
-    topics: [...topicSet].sort(),
-    authors: [...authorSet].sort(),
-    pairs,
-  };
+function uniqueSorted(values: (string | null)[]) {
+  return [
+    ...new Set(values.filter((value): value is string => Boolean(value))),
+  ].sort();
 }
 
 export function useVideoFilters({
@@ -110,55 +54,72 @@ export function useVideoFilters({
   selectedTopic,
   selectedAuthor,
 }: UseVideoFiltersArgs) {
-  const query = useQuery<FilterData>({
-    queryKey: ["video_filter_pairs", language],
-    queryFn: () => fetchFilterData(language),
+  const query = useQuery<FilterPair[]>({
+    queryKey: ["video_filter_pairs"],
+    queryFn: fetchFilterPairs,
     staleTime: 60 * 60 * 1000,
     gcTime: 24 * 60 * 60 * 1000,
     refetchOnWindowFocus: false,
   });
 
+  const pairs = query.data ?? EMPTY_FILTER_PAIRS;
+
   const allTopics = useMemo(
-    () => query.data?.topics ?? [],
-    [query.data?.topics],
+    () => uniqueSorted(pairs.map((pair) => pair.topic)),
+    [pairs],
   );
   const allAuthors = useMemo(
-    () => query.data?.authors ?? [],
-    [query.data?.authors],
+    () => uniqueSorted(pairs.map((pair) => pair.author)),
+    [pairs],
   );
-  const pairs = query.data?.pairs;
+  const allLanguages = useMemo(
+    () => uniqueSorted(pairs.map((pair) => pair.language)),
+    [pairs],
+  );
 
-  // Abhängige Filter (Topic↔Author) funktionieren nur exakt, wenn wir die
-  // Paar-Daten im Fallback-Pfad geladen haben. Im RPC-Pfad zeigen wir alle.
   const availableTopics = useMemo(() => {
-    if (!selectedAuthor || !pairs) return allTopics;
-    return [
-      ...new Set(
-        pairs
-          .filter((p) => p.author === selectedAuthor)
-          .map((p) => p.topic)
-          .filter((t): t is string => Boolean(t)),
-      ),
-    ].sort();
-  }, [allTopics, pairs, selectedAuthor]);
+    return uniqueSorted(
+      pairs
+        .filter(
+          (pair) =>
+            (language === null || pair.language === language) &&
+            (!selectedAuthor || pair.author === selectedAuthor),
+        )
+        .map((pair) => pair.topic),
+    );
+  }, [language, pairs, selectedAuthor]);
 
   const availableAuthors = useMemo(() => {
-    if (!selectedTopic || !pairs) return allAuthors;
-    return [
-      ...new Set(
-        pairs
-          .filter((p) => p.topic === selectedTopic)
-          .map((p) => p.author)
-          .filter((a): a is string => Boolean(a)),
-      ),
-    ].sort();
-  }, [allAuthors, pairs, selectedTopic]);
+    return uniqueSorted(
+      pairs
+        .filter(
+          (pair) =>
+            (language === null || pair.language === language) &&
+            (!selectedTopic || pair.topic === selectedTopic),
+        )
+        .map((pair) => pair.author),
+    );
+  }, [language, pairs, selectedTopic]);
+
+  const availableLanguages = useMemo(() => {
+    return uniqueSorted(
+      pairs
+        .filter(
+          (pair) =>
+            (!selectedTopic || pair.topic === selectedTopic) &&
+            (!selectedAuthor || pair.author === selectedAuthor),
+        )
+        .map((pair) => pair.language),
+    );
+  }, [pairs, selectedAuthor, selectedTopic]);
 
   return {
     ...query,
     allTopics,
     allAuthors,
+    allLanguages,
     availableTopics,
     availableAuthors,
+    availableLanguages,
   };
 }

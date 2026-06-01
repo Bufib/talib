@@ -33,12 +33,7 @@ export const useVideoFilterStore = create<VideoFilterState>((set) => ({
 
   setSelectedAuthor: (author) => set({ selectedAuthor: author }),
 
-  setSelectedLanguage: (language) =>
-    set({
-      selectedLanguage: language,
-      selectedTopic: null,
-      selectedAuthor: null,
-    }),
+  setSelectedLanguage: (language) => set({ selectedLanguage: language }),
 
   resetFilters: (defaultLanguage) =>
     set((state) => ({
