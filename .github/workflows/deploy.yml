@@ -2,7 +2,7 @@ name: Deploy to GitHub Pages
 
 on:
   push:
-    branches: [youtube]
+    branches: [web]
   workflow_dispatch:
 
 permissions:
