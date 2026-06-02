@@ -7,10 +7,12 @@ import { router } from "expo-router";
 import React, { useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import {
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -19,12 +21,17 @@ import { useLanguage } from "../../contexts/LanguageContext";
 import { useVideoFilterStore } from "../../stores/videoFilterStore";
 import { getLanguageLabel } from "../../utils/languageLabel";
 
+const IS_WEB = Platform.OS === "web";
+const COMPACT_WEB_BREAKPOINT = 480;
+
 export default function FilterModal() {
   const { t } = useTranslation();
+  const { width } = useWindowDimensions();
   const colorScheme = useColorScheme();
   const isDark = colorScheme === "dark";
   const insets = useSafeAreaInsets();
   const { lang } = useLanguage();
+  const isCompactWeb = IS_WEB && width <= COMPACT_WEB_BREAKPOINT;
 
   const storeDefaultLanguage = useVideoFilterStore((s) => s.defaultLanguage);
   const selectedTopic = useVideoFilterStore((s) => s.selectedTopic);
@@ -71,7 +78,9 @@ export default function FilterModal() {
 
   return (
     <View style={[styles.sheetRoot, { backgroundColor: panelBg }]}>
-      <View style={styles.panelHeader}>
+      <View
+        style={[styles.panelHeader, isCompactWeb && styles.compactPanelHeader]}
+      >
         <View style={styles.panelTitleRow}>
           <Ionicons
             name="options-outline"
@@ -85,10 +94,20 @@ export default function FilterModal() {
             {t("filter")}
           </Text>
         </View>
-        <View style={styles.headerActions}>
+        <View
+          style={[
+            styles.headerActions,
+            isCompactWeb && styles.compactHeaderActions,
+          ]}
+        >
           {hasActiveFilters && (
             <TouchableOpacity
-              style={[styles.headerActionBtn, styles.headerClearBtn]}
+              accessibilityLabel={t("resetFilters")}
+              style={[
+                styles.headerActionBtn,
+                styles.headerClearBtn,
+                isCompactWeb && styles.compactHeaderActionBtn,
+              ]}
               onPress={() => resetFilters(lang)}
             >
               <Ionicons
@@ -96,16 +115,35 @@ export default function FilterModal() {
                 size={14}
                 color={Colors.universal.primary}
               />
-              <Text style={styles.headerClearBtnText}>{t("resetFilters")}</Text>
+              <Text
+                style={[
+                  styles.headerClearBtnText,
+                  isCompactWeb && styles.compactHeaderActionText,
+                ]}
+              >
+                {t("resetFilters")}
+              </Text>
             </TouchableOpacity>
           )}
 
           <TouchableOpacity
-            style={[styles.headerActionBtn, styles.headerApplyBtn]}
+            accessibilityLabel={t("applyFilters")}
+            style={[
+              styles.headerActionBtn,
+              styles.headerApplyBtn,
+              isCompactWeb && styles.compactHeaderActionBtn,
+            ]}
             onPress={closeSheet}
           >
             <Ionicons name="checkmark" size={15} color="#fff" />
-            <Text style={styles.headerApplyBtnText}>{t("applyFilters")}</Text>
+            <Text
+              style={[
+                styles.headerApplyBtnText,
+                isCompactWeb && styles.compactHeaderActionText,
+              ]}
+            >
+              {t("applyFilters")}
+            </Text>
           </TouchableOpacity>
 
           <TouchableOpacity onPress={closeSheet} style={styles.closeBtn}>
@@ -329,6 +367,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 14,
   },
+  compactPanelHeader: {
+    paddingHorizontal: 14,
+  },
   panelTitleRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -342,6 +383,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 8,
   },
+  compactHeaderActions: {
+    gap: 6,
+  },
   headerActionBtn: {
     flexDirection: "row",
     alignItems: "center",
@@ -350,6 +394,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 9,
     paddingVertical: 7,
     borderRadius: 10,
+  },
+  compactHeaderActionBtn: {
+    height: 28,
+    gap: 2,
+    paddingHorizontal: 6,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  compactHeaderActionText: {
+    fontSize: 10,
   },
   headerClearBtn: {
     borderWidth: 1,
