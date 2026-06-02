@@ -76,7 +76,7 @@ const de = {
 
   // Navigation
   settings: "Einstellungen",
-  home: "Startseite",
+  home: "Home",
 
   // Force update
   updateRequiredTitle: "Update erforderlich",

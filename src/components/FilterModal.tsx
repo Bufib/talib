@@ -403,7 +403,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   compactHeaderActionText: {
-    fontSize: 10,
+    fontSize: 9,
   },
   headerClearBtn: {
     borderWidth: 1,
