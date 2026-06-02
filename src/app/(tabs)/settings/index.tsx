@@ -21,6 +21,7 @@ import {
   Switch,
   View,
   Animated,
+  useWindowDimensions,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -54,6 +55,10 @@ const Settings = () => {
   const titleTapResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
+
+  const MOBILE_WEB_MAX_WIDTH = 768;
+  const { width } = useWindowDimensions();
+  const isMobile = Platform.OS === "web" && width <= MOBILE_WEB_MAX_WIDTH;
 
   useEffect(() => {
     setIsDarkMode(colorScheme === "dark");
@@ -172,7 +177,11 @@ const Settings = () => {
               >
                 <View>
                   <ThemedText
-                    style={[styles.settingTitle, rtl && { textAlign: "right" }]}
+                    style={[
+                      styles.settingTitle,
+                      rtl && { textAlign: "right" },
+                      isMobile && { fontSize: 15 },
+                    ]}
                   >
                     {t("darkMode")}
                   </ThemedText>
@@ -180,6 +189,7 @@ const Settings = () => {
                     style={[
                       styles.settingSubtitle,
                       rtl && { textAlign: "right" },
+                      isMobile && { fontSize: 14 },
                     ]}
                   >
                     {t("enableDarkMode")}
@@ -210,6 +220,7 @@ const Settings = () => {
                       style={[
                         styles.settingTitle,
                         rtl && { textAlign: "right" },
+                        isMobile && { fontSize: 15 },
                       ]}
                     >
                       {t("notifications")}
@@ -218,6 +229,7 @@ const Settings = () => {
                       style={[
                         styles.settingSubtitle,
                         rtl && { textAlign: "right" },
+                        isMobile && { fontSize: 14 },
                       ]}
                     >
                       {t("receivePushNotifications")}

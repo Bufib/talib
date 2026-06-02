@@ -13,5 +13,12 @@
 
 /* Expo Router NativeTabs auf Web: etwas mehr Breite erlauben. */
 [role="tablist"] {
-  max-width: calc(95vw - 15px);
+  max-width: calc(95vw - 16px);
+}
+
+@media (max-width: 480px) {
+  [role="tablist"] [role="tab"] {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
 }
