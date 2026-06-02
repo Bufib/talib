@@ -5,22 +5,22 @@ const de = {
   // Videos
   videosTitle: "Videos",
   videosEmpty: "Es gibt noch keine Videos",
-  watched: "Geschaut",
-  finished: "Fertig",
-  marked_as_watched: "Als geschaut markiert",
-  unmarked_as_watched: "Geschaut-Markierung entfernt",
-  marked_as_finished: "Als fertig markiert",
-  unmarked_as_finished: "Fertig-Markierung entfernt",
+  watched: "Angesehen",
+  finished: "Abgeschlossen",
+  marked_as_watched: "Als angesehen markiert",
+  unmarked_as_watched: "Angesehen-Markierung entfernt",
+  marked_as_finished: "Als abgeschlossen markiert",
+  unmarked_as_finished: "Abgeschlossen-Markierung entfernt",
   videoUnavailable: "Video nicht verfügbar",
   watchOnYoutube: "Auf YouTube ansehen",
   playVideo: "Video abspielen",
   all: "Alle",
   allTopics: "Alle Themen",
-  allAuthors: "Alle Autoren",
+  allAuthors: "Alle Vortragenden",
   allLanguages: "Alle Sprachen",
   topics: "Themen",
   uncategorizedTopic: "Ohne Thema",
-  authors: "Autoren",
+  authors: "Vortragende",
   filter: "Filter",
   resetFilters: "Filter zurücksetzen",
   applyFilters: "Anwenden",
@@ -47,11 +47,11 @@ const de = {
   remove: "Entfernen",
   delete: "Löschen",
   cancel: "Abbrechen",
-  createFolder: "Orderner Erstellen",
+  createFolder: "Ordner erstellen",
   pickColor: "Wähle eine Farbe aus",
   noFavorites: "Du hast noch keine Favoriten!",
   noFoldersYet: "Du hast noch keine Ordner",
-  enterFolderName: "Gebe einen Namen für den Ordner ein",
+  enterFolderName: "Gib einen Namen für den Ordner ein",
   done: "Fertig",
   confirm: "Bestätigen",
   noData: "Keine Daten vorhanden",
@@ -63,7 +63,7 @@ const de = {
   darkMode: "Dunkelmodus",
   enableDarkMode: "Dunkelmodus aktivieren",
   notifications: "Benachrichtigungen",
-  receivePushNotifications: "Erhalte Benachrichtigungen",
+  receivePushNotifications: "Benachrichtigungen erhalten",
   clearAppCache: "App-Cache löschen",
   clearAppCacheConfirmTitle: "Cache löschen",
   clearAppCacheConfirmMessage:
@@ -76,7 +76,7 @@ const de = {
 
   // Navigation
   settings: "Einstellungen",
-  home: "Home",
+  home: "Startseite",
 
   // Force update
   updateRequiredTitle: "Update erforderlich",
@@ -85,9 +85,9 @@ const de = {
   updateNow: "Jetzt aktualisieren",
 
   // Push-notification
-  pushNotificationsDisabledTitle: "Push-Benachrichtigungen Deaktiviert",
+  pushNotificationsDisabledTitle: "Push-Benachrichtigungen deaktiviert",
   pushNotificationsDisabledMessage:
-    "Um Benachrichtigungen zu erhalten, aktiviere diese bitte in deinen Einstellungen.",
+    "Um Benachrichtigungen zu erhalten, aktiviere sie bitte in deinen Einstellungen.",
   openSettings: "Einstellungen öffnen",
   noInternetConnectionTitle: "Keine Internetverbindung",
   noInternetConnectionMessage: "Bitte überprüfe deine Verbindung.",
@@ -102,7 +102,7 @@ const de = {
 
   // About
   aboutAppContent:
-    "Shiacast ist eine Sammlung islamischer Videos in mehreren Sprachen. Die Inhalte werden über YouTube bereitgestellt und in der App komfortabel gebündelt – mit Filterung nach Sprache, Thema und Autor sowie persönlichen Favoriten-Ordnern.",
+    "Talib ist eine Sammlung islamischer Videos in mehreren Sprachen. Die Inhalte werden über YouTube bereitgestellt und in der App übersichtlich gebündelt – mit Filterung nach Sprache, Thema und Vortragendem sowie persönlichen Favoriten-Ordnern.",
 } as const;
 
 export default de;

@@ -6,21 +6,21 @@ const en = {
   videosTitle: "Videos",
   videosEmpty: "There are no videos yet",
   watched: "Watched",
-  finished: "Finished",
+  finished: "Completed",
   marked_as_watched: "Marked as watched",
   unmarked_as_watched: "Watched mark removed",
-  marked_as_finished: "Marked as finished",
-  unmarked_as_finished: "Finished mark removed",
+  marked_as_finished: "Marked as completed",
+  unmarked_as_finished: "Completed mark removed",
   videoUnavailable: "Video unavailable",
   watchOnYoutube: "Watch on YouTube",
   playVideo: "Play video",
   all: "All",
   allTopics: "All topics",
-  allAuthors: "All authors",
+  allAuthors: "All lecturers",
   allLanguages: "All languages",
   topics: "Topics",
-  uncategorizedTopic: "Uncategorized",
-  authors: "Authors",
+  uncategorizedTopic: "No topic",
+  authors: "Lecturers",
   filter: "Filter",
   resetFilters: "Reset filters",
   applyFilters: "Apply",
@@ -47,11 +47,11 @@ const en = {
   remove: "Remove",
   delete: "Delete",
   cancel: "Cancel",
-  createFolder: "Create Folder",
+  createFolder: "Create folder",
   pickColor: "Choose a color",
   noFavorites: "You don't have any favorites yet!",
   noFoldersYet: "You don't have any folders yet",
-  enterFolderName: "Enter a name for the folder",
+  enterFolderName: "Enter a folder name",
   done: "Done",
   confirm: "Confirm",
   noData: "No data available",
@@ -69,7 +69,7 @@ const en = {
   clearAppCacheConfirmMessage:
     "Do you really want to delete all cached files of the app?",
   clearAppCacheSuccessMessage: "The app cache has been cleared successfully.",
-  dataPrivacy: "Data privacy",
+  dataPrivacy: "Privacy",
   aboutTheApp: "About the app",
   imprint: "Legal notice",
   appVersion: "App version",
@@ -85,11 +85,11 @@ const en = {
   updateNow: "Update now",
 
   // Push-notification
-  pushNotificationsDisabledTitle: "Push Notifications Disabled",
+  pushNotificationsDisabledTitle: "Push notifications disabled",
   pushNotificationsDisabledMessage:
     "To receive notifications, please enable them in your settings.",
   openSettings: "Open settings",
-  noInternetConnectionTitle: "No Internet Connection",
+  noInternetConnectionTitle: "No internet connection",
   noInternetConnectionMessage: "Please check your connection.",
   ok: "OK",
 
@@ -102,7 +102,7 @@ const en = {
 
   // About
   aboutAppContent:
-    "Shiacast is a collection of Islamic videos in multiple languages. Content is provided via YouTube and bundled conveniently inside the app — with filtering by language, topic and author, as well as personal favorite folders.",
+    "Talib is a collection of Islamic videos in multiple languages. The content is provided through YouTube and organized clearly within the app — with filtering by language, topic, and lecturer, as well as personal favorite folders.",
 } as const;
 
 export default en;
