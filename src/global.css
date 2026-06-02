@@ -11,7 +11,3 @@
   --font-serif: Georgia, "Times New Roman", serif;
 }
 
-[role="tablist"] [role="tab"] {
-  padding-left: 1px;
-  padding-right: 1px;
-}
