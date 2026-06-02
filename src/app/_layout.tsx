@@ -1,4 +1,5 @@
 import "react-native-reanimated";
+import "../global.css";
 import "../../utils/i18n";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Appearance, Platform, StyleSheet, View } from "react-native";

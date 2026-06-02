@@ -13,8 +13,8 @@ export default function AppTabs() {
       backgroundColor={Colors[colorScheme].contrast}
       indicatorColor={Colors[colorScheme].background}
       labelStyle={{
-        selected: { color: Colors[colorScheme].tint, fontSize: 20 },
-        default: { color: Colors[colorScheme].text, fontSize: 20},
+        selected: { color: Colors[colorScheme].tint,  },
+        default: { color: Colors[colorScheme].text, },
       }}
     >
       <NativeTabs.Trigger name="home" disableTransparentOnScrollEdge>

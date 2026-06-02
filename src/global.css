@@ -11,3 +11,7 @@
   --font-serif: Georgia, "Times New Roman", serif;
 }
 
+/* Expo Router NativeTabs auf Web: etwas mehr Breite erlauben. */
+[role="tablist"] {
+  max-width: calc(100vw - 16px);
+}
