@@ -304,7 +304,7 @@ const Settings = () => {
                 </ThemedText>
               </Pressable>
 
-              <Pressable onPress={() => router.push("/settings/impressum")}>
+              <Pressable onPress={() => router.push("/(impressum)/impressum")}>
                 <ThemedText
                   style={[styles.footerLink, rtl && { textAlign: "right" }]}
                 >
