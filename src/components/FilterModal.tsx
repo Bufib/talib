@@ -85,13 +85,37 @@ export default function FilterModal() {
             {t("filter")}
           </Text>
         </View>
-        <TouchableOpacity onPress={closeSheet} style={styles.closeBtn}>
-          <Ionicons
-            name="close"
-            size={22}
-            color={isDark ? "#8899aa" : "#666"}
-          />
-        </TouchableOpacity>
+        <View style={styles.headerActions}>
+          {hasActiveFilters && (
+            <TouchableOpacity
+              style={[styles.headerActionBtn, styles.headerClearBtn]}
+              onPress={() => resetFilters(lang)}
+            >
+              <Ionicons
+                name="refresh-outline"
+                size={14}
+                color={Colors.universal.primary}
+              />
+              <Text style={styles.headerClearBtnText}>{t("resetFilters")}</Text>
+            </TouchableOpacity>
+          )}
+
+          <TouchableOpacity
+            style={[styles.headerActionBtn, styles.headerApplyBtn]}
+            onPress={closeSheet}
+          >
+            <Ionicons name="checkmark" size={15} color="#fff" />
+            <Text style={styles.headerApplyBtnText}>{t("applyFilters")}</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity onPress={closeSheet} style={styles.closeBtn}>
+            <Ionicons
+              name="close"
+              size={22}
+              color={isDark ? "#8899aa" : "#666"}
+            />
+          </TouchableOpacity>
+        </View>
       </View>
 
       <View
@@ -286,36 +310,6 @@ export default function FilterModal() {
                 ))}
               </View>
             </View>
-
-            <View style={styles.actionsRow}>
-              {hasActiveFilters && (
-                <TouchableOpacity
-                  style={[styles.actionBtn, styles.clearBtn]}
-                  onPress={() => resetFilters(lang)}
-                >
-                  <Ionicons
-                    name="refresh-outline"
-                    size={15}
-                    color={Colors.universal.primary}
-                    style={{ marginRight: 6 }}
-                  />
-                  <Text style={styles.clearBtnText}>{t("resetFilters")}</Text>
-                </TouchableOpacity>
-              )}
-
-              <TouchableOpacity
-                style={[styles.actionBtn, styles.applyBtn]}
-                onPress={closeSheet}
-              >
-                <Ionicons
-                  name="checkmark"
-                  size={16}
-                  color="#fff"
-                  style={{ marginRight: 6 }}
-                />
-                <Text style={styles.applyBtnText}>{t("applyFilters")}</Text>
-              </TouchableOpacity>
-            </View>
           </>
         )}
       </ScrollView>
@@ -342,6 +336,37 @@ const styles = StyleSheet.create({
   panelTitle: {
     fontSize: 18,
     fontWeight: "700",
+  },
+  headerActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  headerActionBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 4,
+    paddingHorizontal: 9,
+    paddingVertical: 7,
+    borderRadius: 10,
+  },
+  headerClearBtn: {
+    borderWidth: 1,
+    borderColor: Colors.universal.primary,
+  },
+  headerClearBtnText: {
+    color: Colors.universal.primary,
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  headerApplyBtn: {
+    backgroundColor: Colors.universal.primary,
+  },
+  headerApplyBtnText: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "600",
   },
   closeBtn: {
     width: 32,
@@ -388,36 +413,6 @@ const styles = StyleSheet.create({
   },
   chipTextActive: {
     color: "#fff",
-    fontWeight: "600",
-  },
-  actionsRow: {
-    flexDirection: "row",
-    gap: 10,
-    marginTop: 8,
-  },
-  actionBtn: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 12,
-    borderRadius: 12,
-  },
-  clearBtn: {
-    borderWidth: 1.5,
-    borderColor: Colors.universal.primary,
-  },
-  clearBtnText: {
-    color: Colors.universal.primary,
-    fontSize: 14,
-    fontWeight: "600",
-  },
-  applyBtn: {
-    backgroundColor: Colors.universal.primary,
-  },
-  applyBtnText: {
-    color: "#fff",
-    fontSize: 14,
     fontWeight: "600",
   },
 });
