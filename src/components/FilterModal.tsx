@@ -115,14 +115,11 @@ export default function FilterModal() {
                 size={14}
                 color={Colors.universal.primary}
               />
-              <Text
-                style={[
-                  styles.headerClearBtnText,
-                  isCompactWeb && styles.compactHeaderActionText,
-                ]}
-              >
-                {t("resetFilters")}
-              </Text>
+              {!isCompactWeb && (
+                <Text style={styles.headerClearBtnText}>
+                  {t("resetFilters")}
+                </Text>
+              )}
             </TouchableOpacity>
           )}
 
@@ -136,14 +133,9 @@ export default function FilterModal() {
             onPress={closeSheet}
           >
             <Ionicons name="checkmark" size={15} color="#fff" />
-            <Text
-              style={[
-                styles.headerApplyBtnText,
-                isCompactWeb && styles.compactHeaderActionText,
-              ]}
-            >
-              {t("applyFilters")}
-            </Text>
+            {!isCompactWeb && (
+              <Text style={styles.headerApplyBtnText}>{t("applyFilters")}</Text>
+            )}
           </TouchableOpacity>
 
           <TouchableOpacity onPress={closeSheet} style={styles.closeBtn}>
@@ -396,14 +388,11 @@ const styles = StyleSheet.create({
     borderRadius: 10,
   },
   compactHeaderActionBtn: {
+    width: 28,
     height: 28,
-    gap: 2,
-    paddingHorizontal: 6,
-    paddingVertical: 4,
+    paddingHorizontal: 0,
+    paddingVertical: 0,
     borderRadius: 8,
-  },
-  compactHeaderActionText: {
-    fontSize: 9,
   },
   headerClearBtn: {
     borderWidth: 1,
