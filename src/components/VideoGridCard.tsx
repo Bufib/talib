@@ -30,6 +30,7 @@ import {
 } from "react-native";
 import Toast from "react-native-toast-message";
 import { useVideoFavoriteFoldersStore } from "../../stores/videoFavoriteFoldersStore";
+import { deviceName } from "expo-device";
 
 type Props = VideoGridCardType;
 
@@ -68,9 +69,7 @@ export default function VideoGridCard({
   const { hovered: watchedHovered, hoverProps: watchedHoverProps } = useHover();
 
   const webBorderColor =
-    colorScheme === "dark"
-      ? "rgba(255,255,255,0.09)"
-      : "rgba(17,24,28,0.08)";
+    colorScheme === "dark" ? "rgba(255,255,255,0.09)" : "rgba(17,24,28,0.08)";
 
   const authorName = video.author_name;
 
