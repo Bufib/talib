@@ -1,107 +1,96 @@
-import {
-  ScrollView,
-  View,
-  StyleSheet
-} from "react-native";
-import { ThemedView } from "@/components/ThemedView";
+import { ScrollView, StyleSheet } from "react-native";
+import { A, H1, H2, Main, P } from "@expo/html-elements";
 import { useColorScheme } from "@/hooks/useColorScheme";
-import React from "react";
-import Markdown from "react-native-markdown-display";
 import { Colors } from "@/constants/Colors";
 import { useTranslation } from "react-i18next";
 import { Stack } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useLanguage } from "../../../contexts/LanguageContext";
+
+const imprintCopy = {
+  de: {
+    heading: "Impressum",
+    contact: "Kontakt",
+    phone: "Telefon",
+    email: "E-Mail",
+    source: "Quelle",
+  },
+  en: {
+    heading: "Legal notice",
+    contact: "Contact",
+    phone: "Phone",
+    email: "Email",
+    source: "Source",
+  },
+  ar: {
+    heading: "البيانات القانونية",
+    contact: "التواصل",
+    phone: "الهاتف",
+    email: "البريد الإلكتروني",
+    source: "المصدر",
+  },
+} as const;
 
 export default function Impressum() {
-  const impressum = `
- # **Impressum** 
-
- **Angaben gemäß § 5 TMG:**
- Hadi El Ali
- Mangenberger Straße 206
- 42655 Solingen
- 
- Telefon: 015785691987
- email: hadielali@web.de
- `;
-
-  const quelle = `Quelle: `;
-  const link = `[http://www.e-recht24.de](http://www.e-recht24.de)`;
   const colorScheme = useColorScheme();
+  const colors = Colors[colorScheme];
   const { t } = useTranslation();
+  const { lang, rtl } = useLanguage();
+  const copy = imprintCopy[lang];
+  const textDirectionStyle = rtl ? styles.rtlText : styles.ltrText;
 
   return (
     <SafeAreaView style={{ flex: 1 }} edges={["top", "bottom"]}>
+      <Stack.Screen
+        options={{
+          headerTitle: t("imprint"),
+        }}
+      />
+
       <ScrollView
-        style={[
-          styles.scrollStyle,
-          { backgroundColor: Colors[colorScheme].background },
-        ]}
+        style={[styles.scrollStyle, { backgroundColor: colors.background }]}
         contentContainerStyle={styles.scrollContent}
         nestedScrollEnabled={true}
         contentInsetAdjustmentBehavior="automatic"
       >
-        <Stack.Screen
-          options={{
-            headerTitle: t("impressum"),
-          }}
-        />
+        <Main style={styles.innerContainer}>
+          <H1 style={[styles.heading, textDirectionStyle, { color: colors.text }]}>
+            {copy.heading}
+          </H1>
+          <P style={[styles.paragraph, textDirectionStyle, { color: colors.text }]}>
+            Hadi El Ali
+            {"\n"}
+            Mangenberger Straße, 206
+            {"\n"}
+            42655 Solingen
+          </P>
 
-        <View style={styles.innerContainer}>
-          <Markdown
-            style={{
-              body: {
-                textAlign: "justify",
-                fontSize: 16,
-                lineHeight: 40,
-                color: Colors[colorScheme].text,
-              },
-              heading1: {
-                fontSize: 27,
-                lineHeight: 40,
-                color: Colors[colorScheme].text,
-              },
-            }}
+          <H2
+            style={[
+              styles.subheading,
+              textDirectionStyle,
+              { color: colors.text },
+            ]}
           >
-            {impressum}
-          </Markdown>
-          <ThemedView style={{ flexDirection: "row", gap: 5 }}>
-            {/* <Markdown
-              style={{
-                body: {
-                  textAlign: "justify",
-                  fontSize: 16,
-                  lineHeight: 40,
-                  color: Colors[colorScheme].text,
-                },
-                heading1: {
-                  fontSize: 27,
-                  lineHeight: 40,
-                  color: Colors[colorScheme].text,
-                },
-              }}
+            {copy.contact}
+          </H2>
+
+          <P style={[styles.paragraph, textDirectionStyle, { color: colors.text }]}>
+            {copy.phone}: 0157 85 69 19 87
+            {"\n"}
+            {copy.email}: hadielali@web.de
+          </P>
+
+          <P style={[styles.paragraph, textDirectionStyle, { color: colors.text }]}>
+            {copy.source}:{" "}
+            <A
+              href="https://www.e-recht24.de/impressum-generator.html"
+              style={[styles.link, textDirectionStyle, { color: colors.tint }]}
             >
-              {quelle}
-            </Markdown> */}
-            <Markdown
-              style={{
-                body: {
-                  textAlign: "justify",
-                  fontSize: 18,
-                  lineHeight: 40,
-                  color: "#93C024",
-                },
-                heading1: {
-                  fontSize: 27,
-                  lineHeight: 40,
-                  color: Colors[colorScheme].text,
-                },
-              }}
-            >
-              {link}
-            </Markdown>
-          </ThemedView>
-        </View>
+              https://www.e-recht24.de/impressum-generator.html
+            </A>
+          </P>
+        </Main>
       </ScrollView>
     </SafeAreaView>
   );
@@ -118,5 +107,31 @@ const styles = StyleSheet.create({
   },
   innerContainer: {
     paddingBottom: 100,
+  },
+  heading: {
+    fontSize: 27,
+    lineHeight: 36,
+    marginBottom: 20,
+  },
+  subheading: {
+    fontSize: 22,
+    lineHeight: 30,
+    marginBottom: 12,
+  },
+  paragraph: {
+    fontSize: 16,
+    lineHeight: 27,
+    marginBottom: 16,
+  },
+  link: {
+    textDecorationLine: "underline",
+  },
+  ltrText: {
+    textAlign: "left",
+    writingDirection: "ltr",
+  },
+  rtlText: {
+    textAlign: "right",
+    writingDirection: "rtl",
   },
 });
