@@ -1,6 +1,7 @@
 import { Linking, StyleSheet, Text, TouchableOpacity } from "react-native";
 import React from "react";
 import { useTranslation } from "react-i18next";
+import { useIsMobileWeb } from "@/hooks/useIsMobileWeb";
 
 const FeedbackButton = () => {
   const sendEmail = () => {
@@ -12,10 +13,10 @@ const FeedbackButton = () => {
     Linking.openURL(url);
   };
   const { t } = useTranslation();
-
+  const isMobileWeb = useIsMobileWeb();
   return (
     <TouchableOpacity
-      style={[styles.button]}
+      style={[styles.button, isMobileWeb ? { width: "95%", alignSelf: "center" } : { width: 180 }]}
       onPress={sendEmail}
       activeOpacity={0.7}
     >
@@ -33,7 +34,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     alignSelf: "flex-start",
-    width: 180,
   },
   label: {
     color: "#FFFFFF",

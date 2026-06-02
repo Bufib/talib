@@ -28,6 +28,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import ClearAppCacheButton from "@/components/ClearCacheButton";
 import FeedbackButton from "@/components/FeedbackButton";
 import { useScreenFadeIn } from "@/hooks/useScreenFadeIn";
+import { useIsMobileWeb } from "@/hooks/useIsMobileWeb";
 
 const IS_WEB = Platform.OS === "web";
 const WEB_TAB_BAR_TOP_OFFSET = 80;
@@ -56,9 +57,7 @@ const Settings = () => {
     null,
   );
 
-  const MOBILE_WEB_MAX_WIDTH = 768;
-  const { width } = useWindowDimensions();
-  const isMobile = Platform.OS === "web" && width <= MOBILE_WEB_MAX_WIDTH;
+ const isMobileWeb = useIsMobileWeb();
 
   useEffect(() => {
     setIsDarkMode(colorScheme === "dark");
@@ -180,7 +179,7 @@ const Settings = () => {
                     style={[
                       styles.settingTitle,
                       rtl && { textAlign: "right" },
-                      isMobile && { fontSize: 15 },
+                      isMobileWeb && { fontSize: 15 },
                     ]}
                   >
                     {t("darkMode")}
@@ -189,7 +188,7 @@ const Settings = () => {
                     style={[
                       styles.settingSubtitle,
                       rtl && { textAlign: "right" },
-                      isMobile && { fontSize: 14 },
+                      isMobileWeb && { fontSize: 14 },
                     ]}
                   >
                     {t("enableDarkMode")}
@@ -220,7 +219,7 @@ const Settings = () => {
                       style={[
                         styles.settingTitle,
                         rtl && { textAlign: "right" },
-                        isMobile && { fontSize: 15 },
+                        isMobileWeb && { fontSize: 15 },
                       ]}
                     >
                       {t("notifications")}
@@ -229,7 +228,7 @@ const Settings = () => {
                       style={[
                         styles.settingSubtitle,
                         rtl && { textAlign: "right" },
-                        isMobile && { fontSize: 14 },
+                        isMobileWeb && { fontSize: 14 },
                       ]}
                     >
                       {t("receivePushNotifications")}
