@@ -48,6 +48,9 @@ const de = {
   delete: "Löschen",
   cancel: "Abbrechen",
   createFolder: "Ordner erstellen",
+  deleteFavoriteFolderConfirmTitle: "Ordner löschen",
+  deleteFavoriteFolderConfirmMessage:
+    'Möchtest du den Ordner "{{folderName}}" wirklich löschen?',
   pickColor: "Wähle eine Farbe aus",
   noFavorites: "Du hast noch keine Favoriten!",
   noFoldersYet: "Du hast noch keine Ordner",

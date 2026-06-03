@@ -48,6 +48,9 @@ const en = {
   delete: "Delete",
   cancel: "Cancel",
   createFolder: "Create folder",
+  deleteFavoriteFolderConfirmTitle: "Delete folder",
+  deleteFavoriteFolderConfirmMessage:
+    'Do you really want to delete the folder "{{folderName}}"?',
   pickColor: "Choose a color",
   noFavorites: "You don't have any favorites yet!",
   noFoldersYet: "You don't have any folders yet",

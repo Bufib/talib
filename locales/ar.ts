@@ -48,6 +48,9 @@ const ar = {
   delete: "حذف",
   cancel: "إلغاء",
   createFolder: "إنشاء مجلد",
+  deleteFavoriteFolderConfirmTitle: "حذف المجلد",
+  deleteFavoriteFolderConfirmMessage:
+    'هل تريد حقًا حذف المجلد "{{folderName}}"؟',
   pickColor: "اختر لونًا",
   noFavorites: "لا توجد لديك عناصر مفضلة بعد!",
   noFoldersYet: "لا توجد لديك مجلدات بعد",

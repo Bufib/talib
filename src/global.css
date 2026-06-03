@@ -23,8 +23,3 @@
   }
 }
 
-/* FormSheet-Drawer ueber der fixed Web-Tab-Leiste anzeigen. */
-[data-vaul-overlay],
-[data-vaul-drawer] {
-  z-index: 1;
-}

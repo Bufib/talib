@@ -9,7 +9,7 @@ import { useVideoFavoriteFoldersStore } from "../../stores/videoFavoriteFoldersS
 import { useVideosByIdsForFavorites } from "@/hooks/useVideosByIdsForFavorites";
 import { useScreenFadeIn } from "@/hooks/useScreenFadeIn";
 import { Ionicons } from "@expo/vector-icons";
-import React, { useMemo, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Alert,
@@ -41,20 +41,46 @@ export default function RenderFavoriteVideos() {
   const favorites = useVideoFavoriteFoldersStore((s) => s.favorites);
   const removeFolder = useVideoFavoriteFoldersStore((s) => s.removeFolder);
 
-  const handleDeleteFolder = (folderId: string, folderName: string) => {
-    Alert.alert(t("confirm"), `"${folderName}"`, [
-      { text: t("back"), style: "cancel" },
-      {
-        text: t("remove"),
-        style: "destructive",
-        onPress: () => {
-          removeFolder(folderId);
-          if (selectedFolderId === folderId) setSelectedFolderId(null);
-          if (folders.length <= 1) setIsEditingFolders(false);
+  const deleteFolder = useCallback(
+    (folderId: string) => {
+      removeFolder(folderId);
+      setSelectedFolderId((current) =>
+        current === folderId ? null : current,
+      );
+      setIsEditingFolders((current) => (folders.length <= 1 ? false : current));
+    },
+    [folders.length, removeFolder],
+  );
+
+  const handleDeleteFolder = useCallback(
+    (folderId: string, folderName: string) => {
+      const title = t("deleteFavoriteFolderConfirmTitle");
+      const message = t("deleteFavoriteFolderConfirmMessage", { folderName });
+
+      if (IS_WEB) {
+        const confirm = (
+          globalThis as typeof globalThis & {
+            confirm?: (message?: string) => boolean;
+          }
+        ).confirm;
+
+        if (confirm?.(`${title}\n\n${message}`)) {
+          deleteFolder(folderId);
+        }
+        return;
+      }
+
+      Alert.alert(title, message, [
+        { text: t("cancel"), style: "cancel" },
+        {
+          text: t("delete"),
+          style: "destructive",
+          onPress: () => deleteFolder(folderId),
         },
-      },
-    ]);
-  };
+      ]);
+    },
+    [deleteFolder, t],
+  );
 
   const allFavoriteIds = useMemo(
     () => favorites.filter((f) => f.folderIds.length > 0).map((f) => f.videoId),
