@@ -47,6 +47,7 @@ declare global {
         element: HTMLElement,
         options: {
           height?: number | string;
+          host?: string;
           playerVars?: YoutubePlayerVars;
           videoId?: string;
           width?: number | string;
@@ -256,6 +257,7 @@ const YoutubeVideoPlayer = forwardRef<
 
       playerRef.current = new window.YT.Player(placeholder, {
         height: "100%",
+        host: "https://www.youtube-nocookie.com",
         playerVars,
         videoId,
         width: "100%",

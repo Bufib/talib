@@ -1,6 +1,9 @@
 LLM CODEBASE CONTEXT FOR SHIACAST
 =================================
 
+Last checked: 2026-06-05 against the repo at
+/Users/hadielali/shiacast/shiacast.
+
 Purpose of this file
 --------------------
 This file is meant as a compact but high-signal briefing for another LLM that
@@ -10,11 +13,21 @@ important project conventions.
 
 Project summary
 ---------------
-Shiacast is an Expo / React Native app for browsing curated Islamic YouTube
-videos. The app supports German, English, and Arabic, including RTL layout for
-Arabic. Users can browse videos by topic rows, search and filter videos, open a
-dedicated video player page, mark videos as watched/finished, and save videos
-into local favorite folders.
+Talib is an Expo / React Native app for browsing curated Islamic YouTube videos.
+The repository is still named "shiacast" and package.json is still named
+"shia-wissen", but app.json and the web manifest identify the product as
+"Talib" / "talib". The app supports German, English, and Arabic, including RTL
+layout for Arabic. Users can browse videos by topic rows, search and filter
+videos, open a dedicated video player page, mark videos as watched/finished, and
+save videos into local favorite folders.
+
+Current app identity from app.json:
+- name: Talib
+- slug/scheme: talib
+- iOS bundleIdentifier: com.hadi-ea.talib
+- Android package: com.hadi_ea.talib
+- owner: hadi_ea
+- version: 1.0.0
 
 The project was previously closer to a "podcast" naming model, but current code
 should use "video" terminology everywhere. Do not reintroduce "podcast" names
@@ -22,8 +35,8 @@ for routes, variables, folders, or UI concepts.
 
 Tech stack
 ----------
-- Expo SDK 55
-- React 19 / React Native 0.83
+- Expo SDK 55.0.25
+- React 19.2.0 / React Native 0.83.6
 - Expo Router with typed routes enabled
 - expo-router unstable NativeTabs for bottom tabs
 - React Query for Supabase server data
@@ -35,6 +48,9 @@ Tech stack
 - i18next / react-i18next for translations
 - expo-image for thumbnails
 - expo-notifications for push notifications
+- expo-video for the native intro video
+- expo-store-review for native app review prompts
+- @react-native-community/netinfo for connection status
 
 Important commands
 ------------------
@@ -82,6 +98,10 @@ Important top-level paths:
   SQL helper migration(s), especially RPCs for video filters/languages and the
   normalized video schema.
 
+- app.json / public/manifest.json
+  App identity, Expo plugins, Supabase public config, web manifest, and native
+  permission strings.
+
 Routing and navigation
 ----------------------
 Root layout:
@@ -116,6 +136,14 @@ Main routes:
 
 - src/app/(tabs)/settings/index.tsx
   Settings screen.
+
+- src/app/(tabs)/settings/add-video.tsx
+  Video insertion screen in the settings stack. It is reached from the Settings
+  title after 10 taps within 3 seconds and writes directly to public.videos.
+
+- src/app/(tabs)/settings/about.tsx
+  About screen route exists in the settings stack, though the current settings
+  screen footer does not link to it.
 
 - src/app/video/[id].tsx
   Video player page. Header contains back button, title, optional author, and
@@ -162,8 +190,17 @@ Migration:
 Supabase client:
 - File: utils/supabase.ts
 - Reads supabaseUrl and supabasePublishableKey from app.json extra config.
+  Current configured project URL:
+  https://thqtmzvrjdodgorexjcj.supabase.co
 - Uses AsyncStorage auth storage on native.
 - Starts/stops Supabase auth auto-refresh based on AppState on native.
+- No current sign-in UI was found. Supabase auth is configured for persistence,
+  but normal app use appears to be guest/anonymous browsing plus local state.
+
+Other backend tables touched by app code:
+- public.user_tokens: push token upsert/delete.
+- public.versions: force-update required version lookup.
+- public.paypal: PayPal link lookup/realtime cache.
 
 Server data hooks
 -----------------
@@ -221,7 +258,8 @@ On videos/authors changes:
 
 On paypal changes:
 - Stores/removes a paypal link in AsyncStorage under key "paypal".
-- Settings screen reads this cached paypal link.
+- Settings screen reads this cached paypal link, but the rendered PayPal button
+  is currently commented out in src/app/(tabs)/settings/index.tsx.
 
 Local persisted state
 ---------------------
@@ -275,6 +313,16 @@ Other stores:
   "app-review-storage".
 - stores/dataVersionStore.ts has counters for video and videoFavorites
   versions. Current realtime provider increments videoVersion.
+- Non-Zustand AsyncStorage keys used elsewhere include:
+  - language
+  - userPickedLanguage
+  - i18nextLng
+  - isDarkMode
+  - paypal
+  - expo_push_token
+  - guest_id
+  - required_app_version
+  - hasPlayedIntroVideo
 
 Video browsing flow
 -------------------
@@ -367,13 +415,20 @@ utils/youtube.ts:
 
 src/components/YoutubeVideoPlayer.tsx:
 - Native implementation using react-native-youtube-iframe.
+- Uses a WebView-backed YouTube iframe player and injects CSS to force full
+  height/black background.
+- Uses baseUrlOverride="https://www.youtube-nocookie.com" for YouTube's
+  privacy-enhanced embed domain.
 
 src/components/YoutubeVideoPlayer.web.tsx:
 - Web implementation using the YouTube iframe API.
 - Dynamically loads https://www.youtube.com/iframe_api once.
+- Creates the player with host="https://www.youtube-nocookie.com" for YouTube's
+  privacy-enhanced embed domain.
 - Maps numeric YT states to the app's string state names.
 - Builds embed URL with enablejsapi, playsinline, rel=0, controls=1, origin,
   and optional start/end params.
+- Thumbnails are loaded from https://i.ytimg.com/vi/{videoId}/hqdefault.jpg.
 
 Favorites flow
 --------------
@@ -447,13 +502,28 @@ File: src/app/(tabs)/settings/index.tsx
 Settings includes:
 - Dark mode toggle stored as AsyncStorage key "isDarkMode"; also calls
   Appearance.setColorScheme.
-- Notification toggle controlled by notificationStore and OS permission.
+- Native-only notification toggle controlled by notificationStore and OS
+  permission.
 - LanguageSwitcher.
-- Clear cache button.
-- Feedback button.
-- PayPal button using AsyncStorage key "paypal" maintained by realtime.
-- App version from Constants.expoConfig.version.
-- Links for data privacy, about app, imprint.
+- Native-only clear cache button. It deletes files in FileSystem.cacheDirectory
+  and clears React Query cache, but does not clear persisted AsyncStorage stores.
+- Feedback button opens a mailto link to hadielali@web.de with subject Feedback.
+- App version from Constants.expoConfig.version, shown on native.
+- Footer links:
+  - data privacy: https://bufib.github.io/Islam-Fragen-App-rechtliches/datenschutz
+  - imprint: /(impressum)/impressum
+- A PayPal button exists in commented-out code and would use the AsyncStorage
+  key "paypal" maintained by realtime if re-enabled.
+
+Add-video screen:
+- File: src/app/(tabs)/settings/add-video.tsx
+- Insert form fields: title, youtubeUrl, authorName, languageCode, videoTopic,
+  startTime, endTime.
+- Validates title and YouTube URL, parses optional start/end times, checks for
+  duplicate title+author, inserts into public.videos, then invalidates video
+  query keys.
+- There is no explicit authentication/authorization check in the screen code;
+  Supabase RLS/backend policy must enforce who may insert.
 
 Push notifications
 ------------------
@@ -462,16 +532,83 @@ File: src/hooks/usePushNotifications.ts
 Behavior:
 - Root layout calls usePushNotifications.
 - Effective enabled = user opt-in + OS permission granted.
-- On native device, registers Expo push token.
+- On native device only, registers an Expo push token. It does not run token
+  registration on web and exits early when Device.isDevice is false.
+- It does not auto-request OS permission on app start. Permission is requested
+  only when the user toggles notifications on from Settings and current status
+  is undetermined.
 - Upserts into Supabase table user_tokens with:
   - expo_push_token
   - app_version
   - platform
   - language_code
   - guest_id
+- guest_id is locally generated and persisted in AsyncStorage as
+  "{Date.now()}-{randomString}" if missing.
+- The Expo push token is persisted locally under "expo_push_token".
 - If notifications are disabled, deletes the stored token from Supabase and
   removes local AsyncStorage token.
 - Notification tap navigates to data.route if provided, otherwise to home.
+
+Privacy-relevant implementation snapshot
+----------------------------------------
+Use this section when drafting privacy-policy answers. It is an implementation
+snapshot, not legal advice.
+
+Local-only user/app state:
+- Favorite folders and favorite video mappings:
+  "video-favorite-folders".
+- Watched and finished video timestamps:
+  "video-watched" and "video-finished".
+- Selected app language / whether the user picked it:
+  "language", "userPickedLanguage", and "i18nextLng".
+- Notification opt-in and OS permission status:
+  "notification-storage".
+- Dark mode, font size, intro-video state, app-review timing, cached required
+  app version, cached PayPal link:
+  "isDarkMode", "font-settings", "hasPlayedIntroVideo",
+  "app-review-storage", "required_app_version", "paypal".
+- Clear cache currently clears FileSystem.cacheDirectory and React Query, not
+  these persisted AsyncStorage values.
+
+Data sent to Supabase by normal app flows:
+- Reads public.videos metadata and filter facets.
+- Subscribes to realtime changes for public.videos, public.authors, and
+  public.paypal.
+- Reads public.paypal.paypal_link and public.versions.app_version.
+- When push notifications are enabled, upserts/deletes public.user_tokens with
+  expo_push_token, app_version, platform, language_code, and guest_id.
+- Normal browsing does not send watched/finished/favorite state to Supabase in
+  the current code.
+
+Data sent to Supabase by the hidden add-video flow:
+- Inserts public.videos rows with title, youtube_url, language_code,
+  video_topic, author_name, start_time, and end_time.
+
+External/third-party services visible in code:
+- Supabase: database reads/writes, realtime, public project URL/config.
+- YouTube/Google: thumbnails from i.ytimg.com and video playback through
+  react-native-youtube-iframe/WebView on native or YouTube iframe API on web.
+  Playback embeds use youtube-nocookie.com where supported, but the web API
+  bootstrap script still loads from www.youtube.com/iframe_api.
+- Expo push notifications: Expo push token acquisition and notification
+  delivery path.
+- OS/app stores: expo-store-review prompts and fallback store URLs.
+- Email client/provider: FeedbackButton opens mailto:hadielali@web.de.
+- NetInfo and expo-localization use platform/browser APIs for connection and
+  locale detection.
+
+No analytics/tracking SDK, crash-reporting SDK, ad SDK, payment SDK, or in-app
+account/profile collection was found in the current code scan.
+
+Permission/config notes for privacy review:
+- app.json iOS infoPlist includes NSUserNotificationsUsageDescription.
+- app.json iOS infoPlist also includes NSPhotoLibraryUsageDescription, but no
+  active photo-library access was found in the current code scan.
+- app.json android.permissions is an empty array.
+- The current data privacy footer URL points to an older
+  "Islam-Fragen-App-rechtliches" GitHub Pages URL; update it for Talib before a
+  production release if that policy is not the correct one.
 
 Force update and review prompt
 ------------------------------
@@ -488,6 +625,7 @@ AppReviewPrompt:
 - Sets install date if missing.
 - After 10 seconds, if eligible, requests native store review or opens store URL.
 - Eligibility is controlled by stores/useAppReviewStore.ts.
+- The fallback store URLs currently reference the older Islam-Fragen app ids.
 
 Design and UI conventions in this app
 -------------------------------------
@@ -518,6 +656,8 @@ Known implementation details and caveats
 - The project has a Metro resolver override for "zustand/middleware".
 - Some older files/comments may still have starter-template traces, but current
   feature code is video-focused.
+- app.json and some review/update links still contain legacy or placeholder
+  values; check these before release and before writing public legal text.
 
 How to safely modify the project
 --------------------------------
@@ -575,5 +715,6 @@ Current key files by responsibility
 - Notification store: stores/notificationStore.ts
 - Push notifications: src/hooks/usePushNotifications.ts
 - Settings: src/app/(tabs)/settings/index.tsx
+- Add video screen: src/app/(tabs)/settings/add-video.tsx
 - Force update: src/components/ForceUpdateGate.tsx
 - App review: src/components/AppReviewPrompt.tsx

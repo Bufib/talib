@@ -66,6 +66,7 @@ const YoutubeVideoPlayer = forwardRef<
       initialPlayerParams={initialPlayerParams}
       onChangeState={onChangeState}
       i18nIsDynamicList
+      baseUrlOverride="https://www.youtube-nocookie.com"
       onError={onError}
       onReady={onReady}
       webViewStyle={{ backgroundColor: "#000" }}
