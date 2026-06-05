@@ -3,19 +3,10 @@ import { Stack } from "expo-router";
 const _layout = () => {
   return (
     <Stack screenOptions={{ headerBackButtonMenuEnabled: false }}>
-      <Stack.Screen name="index" options={{ headerShown: false }} />
       <Stack.Screen
-        name="about"
+        name="datenschutz"
         options={{
           presentation: "formSheet",
-          animation: "default",
-        }}
-      />
-
-    
-      <Stack.Screen
-        name="add-video"
-        options={{
           animation: "default",
         }}
       />

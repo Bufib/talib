@@ -240,7 +240,9 @@ function AppContent() {
                   >
                     <Stack.Screen name="index" />
                     <Stack.Screen name="(tabs)" />
-                    <Stack.Screen name="video/[id]" />
+                    <Stack.Screen name="(datenschutz)" />
+                    <Stack.Screen name="(impressum)" />
+
                     <Stack.Screen
                       name="favorite-folders"
                       options={favoriteFolderSheetOptions}

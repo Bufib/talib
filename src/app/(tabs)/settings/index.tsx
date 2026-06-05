@@ -57,7 +57,7 @@ const Settings = () => {
     null,
   );
 
- const isMobileWeb = useIsMobileWeb();
+  const isMobileWeb = useIsMobileWeb();
 
   useEffect(() => {
     setIsDarkMode(colorScheme === "dark");
@@ -291,11 +291,7 @@ const Settings = () => {
               ]}
             >
               <Pressable
-                onPress={() =>
-                  handleOpenExternalUrl(
-                    "https://bufib.github.io/Islam-Fragen-App-rechtliches/datenschutz",
-                  )
-                }
+                onPress={() => router.push("/(datenschutz)/datenschutz")}
               >
                 <ThemedText
                   style={[styles.footerLink, rtl && { textAlign: "right" }]}
