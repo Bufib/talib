@@ -69,6 +69,10 @@ export default function VideoScreen() {
   const playerRef = useRef<YoutubeVideoPlayerRef | null>(null);
   const hasHandledEndRef = useRef(false);
   const hasRequestedFullscreenRef = useRef(false);
+  const titleTapCountRef = useRef(0);
+  const titleTapResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
 
   // Web-only Hover-State fuer den Favoriten-Button.
   const { hovered: favHovered, hoverProps: favHoverProps } = useHover();
@@ -167,6 +171,34 @@ export default function VideoScreen() {
     });
   }, [videoId]);
 
+  const handleVideoTitlePress = useCallback(() => {
+    if (!video) return;
+
+    if (titleTapResetTimeoutRef.current) {
+      clearTimeout(titleTapResetTimeoutRef.current);
+    }
+
+    titleTapCountRef.current += 1;
+
+    if (titleTapCountRef.current >= 10) {
+      titleTapCountRef.current = 0;
+      titleTapResetTimeoutRef.current = null;
+      router.push({
+        pathname: "/settings/add-video",
+        params: {
+          mode: "manage",
+          editVideoId: String(video.id),
+        },
+      });
+      return;
+    }
+
+    titleTapResetTimeoutRef.current = setTimeout(() => {
+      titleTapCountRef.current = 0;
+      titleTapResetTimeoutRef.current = null;
+    }, 3000);
+  }, [video]);
+
   const onPlayerReady = useCallback(() => {
     setIsPlayerReady(true);
 
@@ -240,6 +272,14 @@ export default function VideoScreen() {
     setIsPlaying(true);
     setIsPlayerReady(false);
   }, [playerKey]);
+
+  useEffect(() => {
+    return () => {
+      if (titleTapResetTimeoutRef.current) {
+        clearTimeout(titleTapResetTimeoutRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (!isPlaying || videoEndSeconds === undefined || !youtubeVideoId) return;
@@ -316,6 +356,7 @@ export default function VideoScreen() {
 
         <View style={styles.headerTitleBlock}>
           <Text
+            onPress={handleVideoTitlePress}
             numberOfLines={2}
             ellipsizeMode="tail"
             style={[

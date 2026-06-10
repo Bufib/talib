@@ -2,8 +2,14 @@ import { ThemedText } from "@/components/ThemedText";
 import { Colors } from "@/constants/Colors";
 import { useColorScheme } from "@/hooks/useColorScheme";
 import { useQueryClient } from "@tanstack/react-query";
-import { Stack } from "expo-router";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { Stack, useLocalSearchParams } from "expo-router";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -399,10 +405,46 @@ function isUniqueConstraintError(error: unknown) {
   );
 }
 
+function firstSearchParam(value: string | string[] | undefined) {
+  if (Array.isArray(value)) return value[0];
+  return value;
+}
+
+function parseOptionalId(value: string | undefined) {
+  if (!value) return null;
+
+  const id = Number(value);
+  return Number.isInteger(id) && id > 0 ? id : null;
+}
+
 export default function AddVideo() {
   const colorScheme = useColorScheme();
   const queryClient = useQueryClient();
-  const [mode, setMode] = useState<ViewMode>("insert");
+  const routeParams = useLocalSearchParams<{
+    mode?: string | string[];
+    editVideoId?: string | string[];
+    topic?: string | string[];
+  }>();
+  const requestedMode = firstSearchParam(routeParams.mode);
+  const requestedEditVideoId = parseOptionalId(
+    firstSearchParam(routeParams.editVideoId),
+  );
+  const requestedTopic =
+    optionalText(firstSearchParam(routeParams.topic) ?? "") ?? null;
+  const shouldOpenManagement =
+    requestedMode === "manage" ||
+    requestedEditVideoId !== null ||
+    requestedTopic !== null;
+  const shortcutKey =
+    requestedEditVideoId !== null
+      ? `video:${requestedEditVideoId}`
+      : requestedTopic
+        ? `topic:${requestedTopic}`
+        : null;
+  const handledShortcutRef = useRef<string | null>(null);
+  const [mode, setMode] = useState<ViewMode>(() =>
+    shouldOpenManagement ? "manage" : "insert",
+  );
   const [sharedValues, setSharedValues] =
     useState<SharedValues>(initialSharedValues);
   const [sharedFields, setSharedFields] =
@@ -511,6 +553,12 @@ export default function AddVideo() {
     }
   }, [loadManagementData, managementLoaded, mode]);
 
+  useEffect(() => {
+    if (shouldOpenManagement) {
+      setMode("manage");
+    }
+  }, [shouldOpenManagement]);
+
   const authorVideoCounts = useMemo(() => {
     const counts = new Map<string, number>();
 
@@ -547,19 +595,26 @@ export default function AddVideo() {
 
   useEffect(() => {
     if (
+      managementLoaded &&
       selectedTopic &&
+      topicRows.length > 0 &&
       !topicRows.some((topicRow) => topicRow.topic === selectedTopic)
     ) {
       setSelectedTopic(null);
       setTopicDraftName("");
     }
-  }, [selectedTopic, topicRows]);
+  }, [managementLoaded, selectedTopic, topicRows]);
 
   const filteredManagedVideos = useMemo(() => {
     const normalizedSearch = managementSearch.trim().toLocaleLowerCase("de");
-    if (!normalizedSearch) return managedVideos;
 
     return managedVideos.filter((video) => {
+      const matchesSelectedTopic =
+        !selectedTopic || parseTopics(video.video_topic).includes(selectedTopic);
+
+      if (!matchesSelectedTopic) return false;
+      if (!normalizedSearch) return true;
+
       const values = [
         String(video.id),
         video.title,
@@ -573,7 +628,7 @@ export default function AddVideo() {
         value.toLocaleLowerCase("de").includes(normalizedSearch),
       );
     });
-  }, [managedVideos, managementSearch]);
+  }, [managedVideos, managementSearch, selectedTopic]);
 
   const updateSharedValue = (key: SharedFieldKey, value: string) => {
     setSharedValues((current) => ({ ...current, [key]: value }));
@@ -993,6 +1048,50 @@ export default function AddVideo() {
     setEditingVideoId(null);
     setVideoDraft(createBlankVideoDraft());
   };
+
+  useEffect(() => {
+    if (!managementLoaded || !shortcutKey) return;
+    if (handledShortcutRef.current === shortcutKey) return;
+
+    setMode("manage");
+
+    if (requestedEditVideoId !== null) {
+      const video = managedVideos.find(
+        (managedVideo) => managedVideo.id === requestedEditVideoId,
+      );
+
+      if (!video) {
+        setManagementFeedback({
+          type: "error",
+          message: `Video ${requestedEditVideoId} wurde nicht gefunden.`,
+        });
+        handledShortcutRef.current = shortcutKey;
+        return;
+      }
+
+      setSelectedTopic(null);
+      setTopicDraftName("");
+      setManagementSearch(String(video.id));
+      startEditVideo(video);
+      handledShortcutRef.current = shortcutKey;
+      return;
+    }
+
+    if (requestedTopic) {
+      setEditingVideoId(null);
+      setVideoDraft(createBlankVideoDraft());
+      setSelectedTopic(requestedTopic);
+      setTopicDraftName(requestedTopic);
+      setManagementSearch("");
+      handledShortcutRef.current = shortcutKey;
+    }
+  }, [
+    managedVideos,
+    managementLoaded,
+    requestedEditVideoId,
+    requestedTopic,
+    shortcutKey,
+  ]);
 
   const handleSaveVideo = async (videoId: number) => {
     if (operationDisabled) return;
@@ -1477,20 +1576,6 @@ export default function AddVideo() {
 
                 <View style={styles.videoHeaderRow}>
                   <ThemedText style={styles.panelTitle}>Videos</ThemedText>
-                  <Pressable
-                    onPress={addVideoRow}
-                    disabled={isSubmitting}
-                    style={({ pressed }) => [
-                      styles.iconButton,
-                      {
-                        borderColor,
-                        backgroundColor: inputBackground,
-                      },
-                      pressed && !isSubmitting && styles.buttonPressed,
-                    ]}
-                  >
-                    <ThemedText style={styles.iconButtonText}>+</ThemedText>
-                  </Pressable>
                 </View>
 
                 {videos.map((video, index) => (
@@ -1539,6 +1624,24 @@ export default function AddVideo() {
                       )}
                   </View>
                 ))}
+
+                <View style={styles.addVideoFooter}>
+                  <Pressable
+                    onPress={addVideoRow}
+                    disabled={isSubmitting}
+                    style={({ pressed }) => [
+                      styles.iconButton,
+                      {
+                        borderColor,
+                        backgroundColor: inputBackground,
+                      },
+                      pressed && !isSubmitting && styles.buttonPressed,
+                      isSubmitting && styles.disabledButton,
+                    ]}
+                  >
+                    <ThemedText style={styles.iconButtonText}>+</ThemedText>
+                  </Pressable>
+                </View>
 
                 {feedback ? (
                   <ThemedText
@@ -1888,6 +1991,20 @@ export default function AddVideo() {
                         ]}
                       />
 
+                      {selectedTopic ? (
+                        <View style={styles.activeFilterRow}>
+                          <ThemedText
+                            style={[styles.helperText, { color: mutedTextColor }]}
+                          >
+                            Kategorie: {selectedTopic}
+                          </ThemedText>
+                          {renderSmallButton("Alle anzeigen", () => {
+                            setSelectedTopic(null);
+                            setTopicDraftName("");
+                          })}
+                        </View>
+                      ) : null}
+
                       <View style={styles.list}>
                         {filteredManagedVideos.map((video) => {
                           const isEditing = editingVideoId === video.id;
@@ -2125,6 +2242,12 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     gap: 12,
   },
+  addVideoFooter: {
+    minHeight: 44,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-end",
+  },
   iconButton: {
     width: 40,
     height: 40,
@@ -2207,6 +2330,14 @@ const styles = StyleSheet.create({
   inlineForm: {
     flexDirection: "row",
     alignItems: "center",
+    gap: 10,
+    flexWrap: "wrap",
+  },
+  activeFilterRow: {
+    minHeight: 38,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     gap: 10,
     flexWrap: "wrap",
   },

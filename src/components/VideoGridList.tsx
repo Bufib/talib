@@ -4,13 +4,15 @@ import type { VideoType } from "@/constants/Types";
 import { useColorScheme } from "@/hooks/useColorScheme";
 import { useLanguage } from "../../contexts/LanguageContext";
 import { parseTopics } from "../../utils/videoTopics";
-import React, { useCallback, useMemo } from "react";
+import { router } from "expo-router";
+import React, { useCallback, useEffect, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import {
   FlatList,
   type FlatListProps,
   type ListRenderItemInfo,
   Platform,
+  Pressable,
   StyleSheet,
   Text,
   useWindowDimensions,
@@ -62,6 +64,15 @@ export default function VideoGridList({
   const { t } = useTranslation();
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme];
+  const topicTapStateRef = useRef<{
+    key: string | null;
+    count: number;
+    timeout: ReturnType<typeof setTimeout> | null;
+  }>({
+    key: null,
+    count: 0,
+    timeout: null,
+  });
 
   const layoutWidth = IS_WEB ? Math.min(width, WEB_MAX_CONTENT_WIDTH) : width;
 
@@ -202,6 +213,55 @@ export default function VideoGridList({
     [lang, rtl, topicCardWidth],
   );
 
+  const handleTopicTitlePress = useCallback(
+    (section: TopicVideoSection) => {
+      if (section.isUncategorized) return;
+
+      const tapState = topicTapStateRef.current;
+
+      if (tapState.timeout) {
+        clearTimeout(tapState.timeout);
+        tapState.timeout = null;
+      }
+
+      if (tapState.key !== section.key) {
+        tapState.key = section.key;
+        tapState.count = 0;
+      }
+
+      tapState.count += 1;
+
+      if (tapState.count >= 10) {
+        tapState.key = null;
+        tapState.count = 0;
+
+        router.push({
+          pathname: "/settings/add-video",
+          params: {
+            mode: "manage",
+            topic: section.title,
+          },
+        });
+        return;
+      }
+
+      tapState.timeout = setTimeout(() => {
+        tapState.key = null;
+        tapState.count = 0;
+        tapState.timeout = null;
+      }, 3000);
+    },
+    [],
+  );
+
+  useEffect(() => {
+    const tapState = topicTapStateRef.current;
+
+    return () => {
+      if (tapState.timeout) clearTimeout(tapState.timeout);
+    };
+  }, []);
+
   const renderSection = useCallback(
     ({ item: section }: ListRenderItemInfo<TopicVideoSection>) => {
       return (
@@ -228,20 +288,27 @@ export default function VideoGridList({
                 />
               )}
 
-              <Text
-                style={[
-                  styles.topicTitle,
-                  IS_WEB && styles.webTopicTitle,
-                  {
-                    color: colors.text,
-                    textAlign: rtl ? "right" : "left",
-                    writingDirection: rtl ? "rtl" : "ltr",
-                  },
-                ]}
-                numberOfLines={1}
+              <Pressable
+                disabled={section.isUncategorized}
+                hitSlop={8}
+                onPress={() => handleTopicTitlePress(section)}
+                style={styles.topicTitlePressable}
               >
-                {section.title}
-              </Text>
+                <Text
+                  style={[
+                    styles.topicTitle,
+                    IS_WEB && styles.webTopicTitle,
+                    {
+                      color: colors.text,
+                      textAlign: rtl ? "right" : "left",
+                      writingDirection: rtl ? "rtl" : "ltr",
+                    },
+                  ]}
+                  numberOfLines={1}
+                >
+                  {section.title}
+                </Text>
+              </Pressable>
             </View>
 
             <Text
@@ -283,6 +350,7 @@ export default function VideoGridList({
       colors.text,
       rtl,
       getTopicItemLayout,
+      handleTopicTitlePress,
       renderVideo,
     ],
   );
@@ -370,6 +438,10 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: "center",
     gap: 8,
+  },
+  topicTitlePressable: {
+    flex: 1,
+    minWidth: 0,
   },
   webTopicAccent: {
     width: 4,
