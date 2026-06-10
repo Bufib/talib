@@ -3,9 +3,10 @@ import { Colors } from "@/constants/Colors";
 import { useColorScheme } from "@/hooks/useColorScheme";
 import { useQueryClient } from "@tanstack/react-query";
 import { Stack } from "expo-router";
-import React, { useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -20,7 +21,10 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import Toast from "react-native-toast-message";
 
 import { supabase } from "../../../../utils/supabase";
+import { parseTopics } from "../../../../utils/videoTopics";
 import { getYoutubeVideoId, parseYoutubeTime } from "../../../../utils/youtube";
+
+type ViewMode = "insert" | "manage";
 
 type SharedFieldKey =
   | "authorName"
@@ -39,6 +43,32 @@ type VideoRow = SharedValues & {
   id: string;
   title: string;
   youtubeUrl: string;
+};
+
+type VideoDraft = Record<VideoFieldKey, string>;
+
+type ManagedVideo = {
+  id: number;
+  title: string;
+  youtube_url: string;
+  created_at: string;
+  language_code: string | null;
+  video_topic: string | null;
+  author_name: string | null;
+  start_time: number | null;
+  end_time: number | null;
+};
+
+type AuthorRow = {
+  id: number;
+  created_at: string | null;
+  author_name: string;
+  source: "authors" | "videos";
+};
+
+type TopicRow = {
+  topic: string;
+  count: number;
 };
 
 type Feedback = {
@@ -136,6 +166,11 @@ const sharedFieldDefinitions: FieldDefinition<SharedFieldKey>[] = [
   },
 ];
 
+const managedVideoFieldDefinitions: FieldDefinition<VideoFieldKey>[] = [
+  ...baseVideoFields,
+  ...sharedFieldDefinitions,
+];
+
 let videoRowSequence = 0;
 
 function createVideoRow(values?: Partial<VideoRow>): VideoRow {
@@ -147,6 +182,26 @@ function createVideoRow(values?: Partial<VideoRow>): VideoRow {
     youtubeUrl: "",
     ...initialSharedValues,
     ...values,
+  };
+}
+
+function createBlankVideoDraft(): VideoDraft {
+  return {
+    title: "",
+    youtubeUrl: "",
+    ...initialSharedValues,
+  };
+}
+
+function createVideoDraft(video: ManagedVideo): VideoDraft {
+  return {
+    title: video.title ?? "",
+    youtubeUrl: video.youtube_url ?? "",
+    authorName: video.author_name ?? "",
+    languageCode: video.language_code ?? "",
+    videoTopic: video.video_topic ?? "",
+    startTime: video.start_time == null ? "" : String(video.start_time),
+    endTime: video.end_time == null ? "" : String(video.end_time),
   };
 }
 
@@ -167,22 +222,187 @@ function parseOptionalTime(value: string, label: string) {
   return seconds;
 }
 
-function getErrorMessage(error: unknown) {
+function getErrorMessage(
+  error: unknown,
+  fallback = "Die Aktion konnte nicht abgeschlossen werden.",
+) {
   if (error instanceof Error) return error.message;
   if (typeof error === "object" && error !== null && "message" in error) {
     const message = (error as { message?: unknown }).message;
     if (typeof message === "string") return message;
   }
-  return "Die Videos konnten nicht eingefügt werden.";
+  return fallback;
 }
 
 function getDuplicateKey(title: string, authorName: string | null) {
   return `${authorName ?? "NO_AUTHOR"}::${title.toLocaleLowerCase("de")}`;
 }
 
+function normalizeAuthorNameForComparison(authorName: string) {
+  return authorName.trim().toLocaleLowerCase("de");
+}
+
+function mergeAuthorsFromSources(
+  authorRows: {
+    id: number;
+    created_at: string;
+    author_name: string;
+  }[],
+  videoRows: ManagedVideo[],
+): AuthorRow[] {
+  const authorMap = new Map<string, AuthorRow>();
+
+  for (const author of authorRows) {
+    const authorName = author.author_name.trim();
+    if (!authorName) continue;
+
+    authorMap.set(normalizeAuthorNameForComparison(authorName), {
+      id: author.id,
+      created_at: author.created_at,
+      author_name: authorName,
+      source: "authors",
+    });
+  }
+
+  for (const video of videoRows) {
+    const authorName = video.author_name?.trim();
+    if (!authorName) continue;
+
+    const key = normalizeAuthorNameForComparison(authorName);
+    if (authorMap.has(key)) continue;
+
+    authorMap.set(key, {
+      id: -(authorMap.size + 1),
+      created_at: null,
+      author_name: authorName,
+      source: "videos",
+    });
+  }
+
+  return [...authorMap.values()].sort((a, b) =>
+    a.author_name.localeCompare(b.author_name, "de"),
+  );
+}
+
+function buildVideoPayloadFromDraft(
+  draft: VideoDraft,
+  rowLabel = "Video",
+): VideoInsertPayload {
+  const title = draft.title.trim();
+  const youtubeUrl = draft.youtubeUrl.trim();
+  const authorName = optionalText(draft.authorName);
+  const languageCode = optionalText(draft.languageCode)?.toLowerCase() ?? null;
+  const videoTopic = optionalText(draft.videoTopic);
+
+  if (!title || !youtubeUrl) {
+    throw new Error(`${rowLabel}: Titel und YouTube URL sind Pflicht.`);
+  }
+
+  if (!getYoutubeVideoId(youtubeUrl)) {
+    throw new Error(`${rowLabel}: Bitte eine gültige YouTube URL eintragen.`);
+  }
+
+  const startTime = parseOptionalTime(draft.startTime, `${rowLabel} Startzeit`);
+  const endTime = parseOptionalTime(draft.endTime, `${rowLabel} Endzeit`);
+
+  if (startTime !== null && endTime !== null && endTime <= startTime) {
+    throw new Error(
+      `${rowLabel}: Die Endzeit muss größer sein als die Startzeit.`,
+    );
+  }
+
+  return {
+    title,
+    youtube_url: youtubeUrl,
+    language_code: languageCode,
+    video_topic: videoTopic,
+    author_name: authorName,
+    start_time: startTime,
+    end_time: endTime,
+  };
+}
+
+function normalizeTopicList(topics: string[]) {
+  const seen = new Set<string>();
+  const normalizedTopics: string[] = [];
+
+  for (const topic of topics) {
+    const normalizedTopic = topic.trim();
+    const key = normalizedTopic.toLocaleLowerCase("de");
+
+    if (!normalizedTopic || seen.has(key)) continue;
+    seen.add(key);
+    normalizedTopics.push(normalizedTopic);
+  }
+
+  return normalizedTopics;
+}
+
+function serializeTopicList(topics: string[]) {
+  const normalizedTopics = normalizeTopicList(topics);
+  return normalizedTopics.length > 0 ? normalizedTopics.join(", ") : null;
+}
+
+async function ensureAuthorsExist(authorNames: (string | null)[]) {
+  const uniqueAuthors = [
+    ...new Set(authorNames.map((name) => name?.trim()).filter(Boolean)),
+  ] as string[];
+
+  if (uniqueAuthors.length === 0) return;
+
+  const { error } = await supabase.from("authors").upsert(
+    uniqueAuthors.map((author_name) => ({ author_name })),
+    {
+      onConflict: "author_name",
+      ignoreDuplicates: true,
+    },
+  );
+
+  if (error) throw error;
+}
+
+function confirmDestructiveAction(title: string, message: string) {
+  if (Platform.OS === "web" && typeof globalThis.confirm === "function") {
+    return Promise.resolve(globalThis.confirm(`${title}\n\n${message}`));
+  }
+
+  return new Promise<boolean>((resolve) => {
+    Alert.alert(
+      title,
+      message,
+      [
+        {
+          text: "Abbrechen",
+          style: "cancel",
+          onPress: () => resolve(false),
+        },
+        {
+          text: "Löschen",
+          style: "destructive",
+          onPress: () => resolve(true),
+        },
+      ],
+      {
+        cancelable: true,
+        onDismiss: () => resolve(false),
+      },
+    );
+  });
+}
+
+function isUniqueConstraintError(error: unknown) {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: unknown }).code === "23505"
+  );
+}
+
 export default function AddVideo() {
   const colorScheme = useColorScheme();
   const queryClient = useQueryClient();
+  const [mode, setMode] = useState<ViewMode>("insert");
   const [sharedValues, setSharedValues] =
     useState<SharedValues>(initialSharedValues);
   const [sharedFields, setSharedFields] =
@@ -190,6 +410,23 @@ export default function AddVideo() {
   const [videos, setVideos] = useState<VideoRow[]>(() => [createVideoRow()]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
+  const [managedVideos, setManagedVideos] = useState<ManagedVideo[]>([]);
+  const [authors, setAuthors] = useState<AuthorRow[]>([]);
+  const [managementLoaded, setManagementLoaded] = useState(false);
+  const [isManagementLoading, setIsManagementLoading] = useState(false);
+  const [isManagementSaving, setIsManagementSaving] = useState(false);
+  const [managementFeedback, setManagementFeedback] =
+    useState<Feedback | null>(null);
+  const [managementSearch, setManagementSearch] = useState("");
+  const [newAuthorName, setNewAuthorName] = useState("");
+  const [editingAuthorId, setEditingAuthorId] = useState<number | null>(null);
+  const [authorDraftName, setAuthorDraftName] = useState("");
+  const [editingVideoId, setEditingVideoId] = useState<number | null>(null);
+  const [videoDraft, setVideoDraft] = useState<VideoDraft>(() =>
+    createBlankVideoDraft(),
+  );
+  const [selectedTopic, setSelectedTopic] = useState<string | null>(null);
+  const [topicDraftName, setTopicDraftName] = useState("");
 
   const colors = Colors[colorScheme];
   const borderColor =
@@ -200,6 +437,143 @@ export default function AddVideo() {
     colorScheme === "dark" ? "rgba(255,255,255,0.07)" : "#fff";
   const mutedTextColor =
     colorScheme === "dark" ? "rgba(236,237,238,0.68)" : "rgba(17,24,28,0.62)";
+  const operationDisabled =
+    isSubmitting || isManagementLoading || isManagementSaving;
+
+  const invalidateVideoCaches = useCallback(async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["videos"] }),
+      queryClient.invalidateQueries({ queryKey: ["video_filter_pairs"] }),
+      queryClient.invalidateQueries({ queryKey: ["video_languages"] }),
+    ]);
+  }, [queryClient]);
+
+  const loadManagementData = useCallback(async () => {
+    setIsManagementLoading(true);
+    setManagementFeedback(null);
+
+    try {
+      const [authorsResult, videosResult] = await Promise.all([
+        supabase
+          .from("authors")
+          .select("id, created_at, author_name")
+          .order("author_name", { ascending: true }),
+        supabase
+          .from("videos")
+          .select(
+            "id, title, youtube_url, created_at, language_code, video_topic, author_name, start_time, end_time",
+          )
+          .order("created_at", { ascending: false })
+          .order("id", { ascending: false }),
+      ]);
+
+      if (videosResult.error) throw videosResult.error;
+
+      const nextManagedVideos = (videosResult.data ?? []) as ManagedVideo[];
+      const nextAuthors = mergeAuthorsFromSources(
+        authorsResult.error
+          ? []
+          : ((authorsResult.data ?? []) as {
+              id: number;
+              created_at: string;
+              author_name: string;
+            }[]),
+        nextManagedVideos,
+      );
+
+      setAuthors(nextAuthors);
+      setManagedVideos(nextManagedVideos);
+      setManagementLoaded(true);
+
+      if (authorsResult.error) {
+        setManagementFeedback({
+          type: "error",
+          message:
+            "Die authors-Tabelle konnte nicht gelesen werden. Ich zeige Autoren aus den Videos.",
+        });
+      }
+    } catch (error) {
+      const message = getErrorMessage(error);
+      setManagementFeedback({ type: "error", message });
+      Toast.show({
+        type: "error",
+        text1: "Daten konnten nicht geladen werden",
+        text2: message,
+      });
+    } finally {
+      setIsManagementLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (mode === "manage" && !managementLoaded) {
+      void loadManagementData();
+    }
+  }, [loadManagementData, managementLoaded, mode]);
+
+  const authorVideoCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+
+    for (const video of managedVideos) {
+      const authorName = video.author_name?.trim();
+      if (!authorName) continue;
+      counts.set(authorName, (counts.get(authorName) ?? 0) + 1);
+    }
+
+    return counts;
+  }, [managedVideos]);
+
+  const authorNamesForComparison = useMemo(() => {
+    return new Set(
+      authors.map((author) =>
+        normalizeAuthorNameForComparison(author.author_name),
+      ),
+    );
+  }, [authors]);
+
+  const topicRows = useMemo<TopicRow[]>(() => {
+    const counts = new Map<string, number>();
+
+    for (const video of managedVideos) {
+      for (const topic of parseTopics(video.video_topic)) {
+        counts.set(topic, (counts.get(topic) ?? 0) + 1);
+      }
+    }
+
+    return [...counts.entries()]
+      .map(([topic, count]) => ({ topic, count }))
+      .sort((a, b) => a.topic.localeCompare(b.topic, "de"));
+  }, [managedVideos]);
+
+  useEffect(() => {
+    if (
+      selectedTopic &&
+      !topicRows.some((topicRow) => topicRow.topic === selectedTopic)
+    ) {
+      setSelectedTopic(null);
+      setTopicDraftName("");
+    }
+  }, [selectedTopic, topicRows]);
+
+  const filteredManagedVideos = useMemo(() => {
+    const normalizedSearch = managementSearch.trim().toLocaleLowerCase("de");
+    if (!normalizedSearch) return managedVideos;
+
+    return managedVideos.filter((video) => {
+      const values = [
+        String(video.id),
+        video.title,
+        video.youtube_url,
+        video.author_name ?? "",
+        video.language_code ?? "",
+        video.video_topic ?? "",
+      ];
+
+      return values.some((value) =>
+        value.toLocaleLowerCase("de").includes(normalizedSearch),
+      );
+    });
+  }, [managedVideos, managementSearch]);
 
   const updateSharedValue = (key: SharedFieldKey, value: string) => {
     setSharedValues((current) => ({ ...current, [key]: value }));
@@ -217,6 +591,11 @@ export default function AddVideo() {
       ),
     );
     if (feedback) setFeedback(null);
+  };
+
+  const updateVideoDraft = (key: VideoFieldKey, value: string) => {
+    setVideoDraft((current) => ({ ...current, [key]: value }));
+    if (managementFeedback) setManagementFeedback(null);
   };
 
   const toggleSharedField = (key: SharedFieldKey) => {
@@ -271,53 +650,29 @@ export default function AddVideo() {
 
     return activeVideos.map((video, index): PreparedVideo => {
       const rowLabel = `Video ${index + 1}`;
-      const title = video.title.trim();
-      const youtubeUrl = video.youtubeUrl.trim();
-      const authorName = optionalText(getResolvedValue(video, "authorName"));
-      const languageCode =
-        optionalText(getResolvedValue(video, "languageCode"))?.toLowerCase() ??
-        null;
-      const videoTopic = optionalText(getResolvedValue(video, "videoTopic"));
-
-      if (!title || !youtubeUrl) {
-        throw new Error(`${rowLabel}: Titel und YouTube URL sind Pflicht.`);
-      }
-
-      if (!getYoutubeVideoId(youtubeUrl)) {
-        throw new Error(`${rowLabel}: Bitte eine gültige YouTube URL eintragen.`);
-      }
-
-      const startTime = parseOptionalTime(
-        getResolvedValue(video, "startTime"),
-        `${rowLabel} Startzeit`,
-      );
-      const endTime = parseOptionalTime(
-        getResolvedValue(video, "endTime"),
-        `${rowLabel} Endzeit`,
+      const payload = buildVideoPayloadFromDraft(
+        {
+          title: video.title,
+          youtubeUrl: video.youtubeUrl,
+          authorName: getResolvedValue(video, "authorName"),
+          languageCode: getResolvedValue(video, "languageCode"),
+          videoTopic: getResolvedValue(video, "videoTopic"),
+          startTime: getResolvedValue(video, "startTime"),
+          endTime: getResolvedValue(video, "endTime"),
+        },
+        rowLabel,
       );
 
-      if (startTime !== null && endTime !== null && endTime <= startTime) {
-        throw new Error(`${rowLabel}: Die Endzeit muss größer sein als die Startzeit.`);
-      }
-
-      const duplicateKey = getDuplicateKey(title, authorName);
+      const duplicateKey = getDuplicateKey(payload.title, payload.author_name);
       if (seenVideos.has(duplicateKey)) {
         throw new Error(`${rowLabel}: Dieser Titel ist für denselben Autor doppelt.`);
       }
       seenVideos.add(duplicateKey);
 
       return {
-        title,
-        authorName,
-        payload: {
-          title,
-          youtube_url: youtubeUrl,
-          language_code: languageCode,
-          video_topic: videoTopic,
-          author_name: authorName,
-          start_time: startTime,
-          end_time: endTime,
-        },
+        title: payload.title,
+        authorName: payload.author_name,
+        payload,
       };
     });
   };
@@ -354,7 +709,13 @@ export default function AddVideo() {
     try {
       preparedVideos = buildPayloads();
     } catch (error) {
-      setFeedback({ type: "error", message: getErrorMessage(error) });
+      setFeedback({
+        type: "error",
+        message: getErrorMessage(
+          error,
+          "Die Videos konnten nicht vorbereitet werden.",
+        ),
+      });
       return;
     }
 
@@ -363,6 +724,7 @@ export default function AddVideo() {
 
     try {
       await assertNoExistingDuplicates(preparedVideos);
+      await ensureAuthorsExist(preparedVideos.map((video) => video.authorName));
 
       const { data: insertedVideos, error: insertError } = await supabase
         .from("videos")
@@ -371,11 +733,8 @@ export default function AddVideo() {
 
       if (insertError) throw insertError;
 
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["videos"] }),
-        queryClient.invalidateQueries({ queryKey: ["video_filter_pairs"] }),
-        queryClient.invalidateQueries({ queryKey: ["video_languages"] }),
-      ]);
+      await invalidateVideoCaches();
+      if (managementLoaded) await loadManagementData();
 
       const insertedCount = insertedVideos?.length ?? preparedVideos.length;
       const message =
@@ -391,7 +750,10 @@ export default function AddVideo() {
         text2: message,
       });
     } catch (error) {
-      const message = getErrorMessage(error);
+      const message = getErrorMessage(
+        error,
+        "Die Videos konnten nicht eingefügt werden.",
+      );
       setFeedback({ type: "error", message });
       Toast.show({
         type: "error",
@@ -403,10 +765,505 @@ export default function AddVideo() {
     }
   };
 
+  const handleAddAuthor = async () => {
+    if (operationDisabled) return;
+
+    const authorName = newAuthorName.trim();
+    if (!authorName) {
+      setManagementFeedback({
+        type: "error",
+        message: "Bitte einen Autorennamen eintragen.",
+      });
+      return;
+    }
+
+    if (authorNamesForComparison.has(normalizeAuthorNameForComparison(authorName))) {
+      setManagementFeedback({
+        type: "error",
+        message: `"${authorName}" existiert bereits.`,
+      });
+      return;
+    }
+
+    setIsManagementSaving(true);
+    setManagementFeedback(null);
+
+    try {
+      const { error } = await supabase
+        .from("authors")
+        .insert({ author_name: authorName });
+
+      if (error) throw error;
+
+      await invalidateVideoCaches();
+      await loadManagementData();
+
+      setNewAuthorName("");
+      setManagementFeedback({
+        type: "success",
+        message: `"${authorName}" wurde hinzugefügt.`,
+      });
+      Toast.show({
+        type: "success",
+        text1: "Autor hinzugefügt",
+        text2: authorName,
+      });
+    } catch (error) {
+      const message = isUniqueConstraintError(error)
+        ? `"${authorName}" existiert bereits.`
+        : getErrorMessage(error);
+      setManagementFeedback({ type: "error", message });
+      Toast.show({
+        type: "error",
+        text1: "Autor konnte nicht hinzugefügt werden",
+        text2: message,
+      });
+    } finally {
+      setIsManagementSaving(false);
+    }
+  };
+
+  const startEditAuthor = (author: AuthorRow) => {
+    setEditingAuthorId(author.id);
+    setAuthorDraftName(author.author_name);
+    setManagementFeedback(null);
+  };
+
+  const cancelEditAuthor = () => {
+    setEditingAuthorId(null);
+    setAuthorDraftName("");
+  };
+
+  const handleSaveAuthor = async (author: AuthorRow) => {
+    if (operationDisabled) return;
+
+    const nextAuthorName = authorDraftName.trim();
+    if (!nextAuthorName) {
+      setManagementFeedback({
+        type: "error",
+        message: "Der Autorenname darf nicht leer sein.",
+      });
+      return;
+    }
+
+    if (nextAuthorName === author.author_name) {
+      cancelEditAuthor();
+      return;
+    }
+
+    const nextAuthorKey = normalizeAuthorNameForComparison(nextAuthorName);
+    const isDuplicateAuthor = authors.some(
+      (existingAuthor) =>
+        existingAuthor.id !== author.id &&
+        normalizeAuthorNameForComparison(existingAuthor.author_name) ===
+          nextAuthorKey,
+    );
+
+    if (isDuplicateAuthor) {
+      setManagementFeedback({
+        type: "error",
+        message: `"${nextAuthorName}" existiert bereits.`,
+      });
+      return;
+    }
+
+    setIsManagementSaving(true);
+    setManagementFeedback(null);
+
+    try {
+      if (author.source === "authors") {
+        const { error } = await supabase
+          .from("authors")
+          .update({ author_name: nextAuthorName })
+          .eq("id", author.id);
+
+        if (error) throw error;
+      } else {
+        await ensureAuthorsExist([nextAuthorName]);
+
+        const { error } = await supabase
+          .from("videos")
+          .update({ author_name: nextAuthorName })
+          .eq("author_name", author.author_name);
+
+        if (error) throw error;
+      }
+
+      await invalidateVideoCaches();
+      await loadManagementData();
+
+      setEditingAuthorId(null);
+      setAuthorDraftName("");
+      setManagementFeedback({
+        type: "success",
+        message: `"${author.author_name}" wurde umbenannt.`,
+      });
+      Toast.show({
+        type: "success",
+        text1: "Autor gespeichert",
+        text2: nextAuthorName,
+      });
+    } catch (error) {
+      const message = isUniqueConstraintError(error)
+        ? `"${nextAuthorName}" existiert bereits.`
+        : getErrorMessage(error);
+      setManagementFeedback({ type: "error", message });
+      Toast.show({
+        type: "error",
+        text1: "Autor konnte nicht gespeichert werden",
+        text2: message,
+      });
+    } finally {
+      setIsManagementSaving(false);
+    }
+  };
+
+  const handleDeleteAuthor = async (author: AuthorRow) => {
+    if (operationDisabled) return;
+
+    if (author.source !== "authors") {
+      setManagementFeedback({
+        type: "error",
+        message: `"${author.author_name}" stammt aus Videos und hat keinen sichtbaren authors-Eintrag.`,
+      });
+      return;
+    }
+
+    const videoCount = authorVideoCounts.get(author.author_name) ?? 0;
+    if (videoCount > 0) {
+      setManagementFeedback({
+        type: "error",
+        message: `"${author.author_name}" ist noch mit ${videoCount} Video${
+          videoCount === 1 ? "" : "s"
+        } verknüpft.`,
+      });
+      return;
+    }
+
+    const confirmed = await confirmDestructiveAction(
+      "Autor löschen?",
+      `"${author.author_name}" wird aus der Autoren-Tabelle entfernt.`,
+    );
+
+    if (!confirmed) return;
+
+    setIsManagementSaving(true);
+    setManagementFeedback(null);
+
+    try {
+      const { error } = await supabase
+        .from("authors")
+        .delete()
+        .eq("id", author.id);
+
+      if (error) throw error;
+
+      await invalidateVideoCaches();
+      await loadManagementData();
+
+      setManagementFeedback({
+        type: "success",
+        message: `"${author.author_name}" wurde gelöscht.`,
+      });
+      Toast.show({
+        type: "success",
+        text1: "Autor gelöscht",
+        text2: author.author_name,
+      });
+    } catch (error) {
+      const message = getErrorMessage(error);
+      setManagementFeedback({ type: "error", message });
+      Toast.show({
+        type: "error",
+        text1: "Autor konnte nicht gelöscht werden",
+        text2: message,
+      });
+    } finally {
+      setIsManagementSaving(false);
+    }
+  };
+
+  const startEditVideo = (video: ManagedVideo) => {
+    setEditingVideoId(video.id);
+    setVideoDraft(createVideoDraft(video));
+    setManagementFeedback(null);
+  };
+
+  const cancelEditVideo = () => {
+    setEditingVideoId(null);
+    setVideoDraft(createBlankVideoDraft());
+  };
+
+  const handleSaveVideo = async (videoId: number) => {
+    if (operationDisabled) return;
+
+    let payload: VideoInsertPayload;
+    try {
+      payload = buildVideoPayloadFromDraft(videoDraft);
+    } catch (error) {
+      setManagementFeedback({
+        type: "error",
+        message: getErrorMessage(error, "Das Video konnte nicht vorbereitet werden."),
+      });
+      return;
+    }
+
+    setIsManagementSaving(true);
+    setManagementFeedback(null);
+
+    try {
+      await ensureAuthorsExist([payload.author_name]);
+
+      const { error } = await supabase
+        .from("videos")
+        .update(payload)
+        .eq("id", videoId);
+
+      if (error) throw error;
+
+      await invalidateVideoCaches();
+      await loadManagementData();
+
+      setEditingVideoId(null);
+      setVideoDraft(createBlankVideoDraft());
+      setManagementFeedback({
+        type: "success",
+        message: `"${payload.title}" wurde gespeichert.`,
+      });
+      Toast.show({
+        type: "success",
+        text1: "Video gespeichert",
+        text2: payload.title,
+      });
+    } catch (error) {
+      const message = getErrorMessage(error);
+      setManagementFeedback({ type: "error", message });
+      Toast.show({
+        type: "error",
+        text1: "Video konnte nicht gespeichert werden",
+        text2: message,
+      });
+    } finally {
+      setIsManagementSaving(false);
+    }
+  };
+
+  const handleDeleteVideo = async (video: ManagedVideo) => {
+    if (operationDisabled) return;
+
+    const confirmed = await confirmDestructiveAction(
+      "Video löschen?",
+      `"${video.title}" wird dauerhaft aus der Videos-Tabelle entfernt.`,
+    );
+
+    if (!confirmed) return;
+
+    setIsManagementSaving(true);
+    setManagementFeedback(null);
+
+    try {
+      const { error } = await supabase
+        .from("videos")
+        .delete()
+        .eq("id", video.id);
+
+      if (error) throw error;
+
+      await invalidateVideoCaches();
+      await loadManagementData();
+
+      if (editingVideoId === video.id) cancelEditVideo();
+
+      setManagementFeedback({
+        type: "success",
+        message: `"${video.title}" wurde gelöscht.`,
+      });
+      Toast.show({
+        type: "success",
+        text1: "Video gelöscht",
+        text2: video.title,
+      });
+    } catch (error) {
+      const message = getErrorMessage(error);
+      setManagementFeedback({ type: "error", message });
+      Toast.show({
+        type: "error",
+        text1: "Video konnte nicht gelöscht werden",
+        text2: message,
+      });
+    } finally {
+      setIsManagementSaving(false);
+    }
+  };
+
+  const handleSelectTopic = (topic: string) => {
+    setSelectedTopic(topic);
+    setTopicDraftName(topic);
+    setManagementFeedback(null);
+  };
+
+  const handleRenameTopic = async () => {
+    if (operationDisabled) return;
+
+    const currentTopic = selectedTopic;
+    const nextTopic = topicDraftName.trim();
+
+    if (!currentTopic) {
+      setManagementFeedback({
+        type: "error",
+        message: "Bitte zuerst ein Thema auswählen.",
+      });
+      return;
+    }
+
+    if (!nextTopic) {
+      setManagementFeedback({
+        type: "error",
+        message: "Der neue Themenname darf nicht leer sein.",
+      });
+      return;
+    }
+
+    if (nextTopic === currentTopic) {
+      setManagementFeedback({
+        type: "error",
+        message: "Der Themenname ist unverändert.",
+      });
+      return;
+    }
+
+    const affectedVideos = managedVideos.filter((video) =>
+      parseTopics(video.video_topic).includes(currentTopic),
+    );
+
+    setIsManagementSaving(true);
+    setManagementFeedback(null);
+
+    try {
+      await Promise.all(
+        affectedVideos.map(async (video) => {
+          const nextTopicValue = serializeTopicList(
+            parseTopics(video.video_topic).map((topic) =>
+              topic === currentTopic ? nextTopic : topic,
+            ),
+          );
+
+          const { error } = await supabase
+            .from("videos")
+            .update({ video_topic: nextTopicValue })
+            .eq("id", video.id);
+
+          if (error) throw error;
+        }),
+      );
+
+      await invalidateVideoCaches();
+      await loadManagementData();
+
+      setSelectedTopic(nextTopic);
+      setTopicDraftName(nextTopic);
+      setManagementFeedback({
+        type: "success",
+        message: `"${currentTopic}" wurde in ${affectedVideos.length} Video${
+          affectedVideos.length === 1 ? "" : "s"
+        } umbenannt.`,
+      });
+      Toast.show({
+        type: "success",
+        text1: "Thema umbenannt",
+        text2: nextTopic,
+      });
+    } catch (error) {
+      const message = getErrorMessage(error);
+      setManagementFeedback({ type: "error", message });
+      Toast.show({
+        type: "error",
+        text1: "Thema konnte nicht geändert werden",
+        text2: message,
+      });
+    } finally {
+      setIsManagementSaving(false);
+    }
+  };
+
+  const handleRemoveTopic = async () => {
+    if (operationDisabled) return;
+
+    const currentTopic = selectedTopic;
+    if (!currentTopic) {
+      setManagementFeedback({
+        type: "error",
+        message: "Bitte zuerst ein Thema auswählen.",
+      });
+      return;
+    }
+
+    const affectedVideos = managedVideos.filter((video) =>
+      parseTopics(video.video_topic).includes(currentTopic),
+    );
+
+    const confirmed = await confirmDestructiveAction(
+      "Thema entfernen?",
+      `"${currentTopic}" wird aus ${affectedVideos.length} Video${
+        affectedVideos.length === 1 ? "" : "s"
+      } entfernt. Die Videos bleiben erhalten.`,
+    );
+
+    if (!confirmed) return;
+
+    setIsManagementSaving(true);
+    setManagementFeedback(null);
+
+    try {
+      await Promise.all(
+        affectedVideos.map(async (video) => {
+          const nextTopicValue = serializeTopicList(
+            parseTopics(video.video_topic).filter(
+              (topic) => topic !== currentTopic,
+            ),
+          );
+
+          const { error } = await supabase
+            .from("videos")
+            .update({ video_topic: nextTopicValue })
+            .eq("id", video.id);
+
+          if (error) throw error;
+        }),
+      );
+
+      await invalidateVideoCaches();
+      await loadManagementData();
+
+      setSelectedTopic(null);
+      setTopicDraftName("");
+      setManagementFeedback({
+        type: "success",
+        message: `"${currentTopic}" wurde aus den Videos entfernt.`,
+      });
+      Toast.show({
+        type: "success",
+        text1: "Thema entfernt",
+        text2: currentTopic,
+      });
+    } catch (error) {
+      const message = getErrorMessage(error);
+      setManagementFeedback({ type: "error", message });
+      Toast.show({
+        type: "error",
+        text1: "Thema konnte nicht entfernt werden",
+        text2: message,
+      });
+    } finally {
+      setIsManagementSaving(false);
+    }
+  };
+
   const renderInput = (
     field: FieldDefinition<VideoFieldKey>,
     value: string,
     onChangeText: (value: string) => void,
+    editable = !isSubmitting,
   ) => (
     <View key={field.key} style={styles.field}>
       <ThemedText style={styles.label}>
@@ -421,7 +1278,7 @@ export default function AddVideo() {
         keyboardType={field.keyboardType}
         autoCapitalize={field.autoCapitalize}
         autoCorrect={field.autoCorrect}
-        editable={!isSubmitting}
+        editable={editable}
         style={[
           styles.input,
           {
@@ -434,12 +1291,52 @@ export default function AddVideo() {
     </View>
   );
 
+  const renderSmallButton = (
+    label: string,
+    onPress: () => void,
+    options?: {
+      danger?: boolean;
+      filled?: boolean;
+      disabled?: boolean;
+    },
+  ) => {
+    const disabled = Boolean(options?.disabled);
+
+    return (
+      <Pressable
+        onPress={onPress}
+        disabled={disabled}
+        style={({ pressed }) => [
+          styles.smallButton,
+          options?.filled
+            ? styles.primarySmallButton
+            : {
+                borderColor,
+                backgroundColor: inputBackground,
+              },
+          pressed && !disabled && styles.buttonPressed,
+          disabled && styles.disabledButton,
+        ]}
+      >
+        <ThemedText
+          style={[
+            styles.smallButtonText,
+            options?.filled && styles.primarySmallButtonText,
+            options?.danger && { color: Colors.universal.error },
+          ]}
+        >
+          {label}
+        </ThemedText>
+      </Pressable>
+    );
+  };
+
   return (
     <SafeAreaView
       style={[styles.safeArea, { backgroundColor: colors.background }]}
       edges={["bottom"]}
     >
-      <Stack.Screen options={{ headerTitle: "Videos einfügen" }} />
+      <Stack.Screen options={{ headerTitle: "Video-Datenbank" }} />
 
       <KeyboardAvoidingView
         style={styles.keyboardView}
@@ -454,71 +1351,533 @@ export default function AddVideo() {
           <View style={styles.content}>
             <View style={styles.titleBlock}>
               <ThemedText type="title" style={styles.title}>
-                Videos einfügen
+                Video-Datenbank
               </ThemedText>
               <ThemedText style={[styles.subtitle, { color: mutedTextColor }]}>
-                Nutze die Switches, um festzulegen, welche Werte für alle Videos
-                gleich bleiben.
+                Videos einfügen, Autoren verwalten und bestehende Einträge direkt
+                bearbeiten.
               </ThemedText>
             </View>
 
             <View
               style={[
-                styles.panel,
+                styles.segmentedControl,
                 {
-                  backgroundColor: colors.contrast,
+                  backgroundColor: inputBackground,
                   borderColor,
                 },
               ]}
             >
-              <ThemedText style={styles.panelTitle}>Gemeinsame Werte</ThemedText>
-
-              {sharedFieldDefinitions.map((field) => {
-                const isShared = sharedFields[field.key];
+              {(["insert", "manage"] as ViewMode[]).map((viewMode) => {
+                const active = mode === viewMode;
 
                 return (
-                  <View
-                    key={field.key}
-                    style={[
-                      styles.sharedField,
-                      { borderBottomColor: mutedBorderColor },
+                  <Pressable
+                    key={viewMode}
+                    onPress={() => setMode(viewMode)}
+                    style={({ pressed }) => [
+                      styles.segmentButton,
+                      active && styles.segmentButtonActive,
+                      pressed && styles.buttonPressed,
                     ]}
                   >
-                    <View style={styles.sharedFieldHeader}>
-                      <View style={styles.sharedFieldTitleGroup}>
-                        <ThemedText style={styles.label}>{field.label}</ThemedText>
+                    <ThemedText
+                      style={[
+                        styles.segmentButtonText,
+                        active && styles.segmentButtonTextActive,
+                      ]}
+                    >
+                      {viewMode === "insert" ? "Einfügen" : "Verwalten"}
+                    </ThemedText>
+                  </Pressable>
+                );
+              })}
+            </View>
+
+            {mode === "insert" ? (
+              <>
+                <View
+                  style={[
+                    styles.panel,
+                    {
+                      backgroundColor: colors.contrast,
+                      borderColor,
+                    },
+                  ]}
+                >
+                  <ThemedText style={styles.panelTitle}>
+                    Gemeinsame Werte
+                  </ThemedText>
+
+                  {sharedFieldDefinitions.map((field) => {
+                    const isShared = sharedFields[field.key];
+
+                    return (
+                      <View
+                        key={field.key}
+                        style={[
+                          styles.sharedField,
+                          { borderBottomColor: mutedBorderColor },
+                        ]}
+                      >
+                        <View style={styles.sharedFieldHeader}>
+                          <View style={styles.sharedFieldTitleGroup}>
+                            <ThemedText style={styles.label}>
+                              {field.label}
+                            </ThemedText>
+                            <ThemedText
+                              style={[
+                                styles.helperText,
+                                { color: mutedTextColor },
+                              ]}
+                            >
+                              {isShared
+                                ? "Gilt für alle Videos"
+                                : "Wird pro Video gesetzt"}
+                            </ThemedText>
+                          </View>
+                          <Switch
+                            value={isShared}
+                            onValueChange={() => toggleSharedField(field.key)}
+                            disabled={isSubmitting}
+                            trackColor={{
+                              false: Colors.light.trackColor,
+                              true: Colors.dark.trackColor,
+                            }}
+                            thumbColor={Colors[colorScheme].thumbColor}
+                          />
+                        </View>
+
+                        {isShared ? (
+                          <TextInput
+                            value={sharedValues[field.key]}
+                            onChangeText={(value) =>
+                              updateSharedValue(field.key, value)
+                            }
+                            placeholder={field.placeholder}
+                            placeholderTextColor={Colors.universal.grayedOut}
+                            keyboardType={field.keyboardType}
+                            autoCapitalize={field.autoCapitalize}
+                            autoCorrect={field.autoCorrect}
+                            editable={!isSubmitting}
+                            style={[
+                              styles.input,
+                              {
+                                backgroundColor: inputBackground,
+                                borderColor,
+                                color: colors.text,
+                              },
+                            ]}
+                          />
+                        ) : null}
+                      </View>
+                    );
+                  })}
+                </View>
+
+                <View style={styles.videoHeaderRow}>
+                  <ThemedText style={styles.panelTitle}>Videos</ThemedText>
+                  <Pressable
+                    onPress={addVideoRow}
+                    disabled={isSubmitting}
+                    style={({ pressed }) => [
+                      styles.iconButton,
+                      {
+                        borderColor,
+                        backgroundColor: inputBackground,
+                      },
+                      pressed && !isSubmitting && styles.buttonPressed,
+                    ]}
+                  >
+                    <ThemedText style={styles.iconButtonText}>+</ThemedText>
+                  </Pressable>
+                </View>
+
+                {videos.map((video, index) => (
+                  <View
+                    key={video.id}
+                    style={[
+                      styles.panel,
+                      styles.videoPanel,
+                      {
+                        backgroundColor: colors.contrast,
+                        borderColor,
+                      },
+                    ]}
+                  >
+                    <View style={styles.videoPanelHeader}>
+                      <ThemedText style={styles.videoTitle}>
+                        Video {index + 1}
+                      </ThemedText>
+                      <Pressable
+                        onPress={() => removeVideoRow(video.id)}
+                        disabled={isSubmitting}
+                        hitSlop={10}
+                        style={({ pressed }) => [
+                          styles.removeButton,
+                          pressed && !isSubmitting && styles.buttonPressed,
+                        ]}
+                      >
+                        <ThemedText style={styles.removeButtonText}>
+                          ×
+                        </ThemedText>
+                      </Pressable>
+                    </View>
+
+                    {baseVideoFields.map((field) =>
+                      renderInput(field, video[field.key], (value) =>
+                        updateVideoField(video.id, field.key, value),
+                      ),
+                    )}
+
+                    {sharedFieldDefinitions
+                      .filter((field) => !sharedFields[field.key])
+                      .map((field) =>
+                        renderInput(field, video[field.key], (value) =>
+                          updateVideoField(video.id, field.key, value),
+                        ),
+                      )}
+                  </View>
+                ))}
+
+                {feedback ? (
+                  <ThemedText
+                    style={[
+                      styles.feedback,
+                      feedback.type === "error"
+                        ? { color: Colors.universal.error }
+                        : { color: Colors.universal.primary },
+                    ]}
+                  >
+                    {feedback.message}
+                  </ThemedText>
+                ) : null}
+
+                <Pressable
+                  onPress={handleSubmit}
+                  disabled={isSubmitting}
+                  style={({ pressed }) => [
+                    styles.submitButton,
+                    isSubmitting && styles.submitButtonDisabled,
+                    pressed && !isSubmitting && styles.submitButtonPressed,
+                  ]}
+                >
+                  {isSubmitting ? (
+                    <ActivityIndicator color="#fff" />
+                  ) : (
+                    <ThemedText style={styles.submitButtonText}>
+                      {videos.filter((video) => !isVideoRowEmpty(video)).length <=
+                      1
+                        ? "Video einfügen"
+                        : "Videos einfügen"}
+                    </ThemedText>
+                  )}
+                </Pressable>
+              </>
+            ) : (
+              <>
+                <View style={styles.managementHeaderRow}>
+                  <View>
+                    <ThemedText style={styles.panelTitle}>Verwalten</ThemedText>
+                    <ThemedText
+                      style={[styles.helperText, { color: mutedTextColor }]}
+                    >
+                      {managedVideos.length} Videos, {authors.length} Autoren,{" "}
+                      {topicRows.length} Themen
+                    </ThemedText>
+                  </View>
+
+                  {renderSmallButton(
+                    isManagementLoading ? "Lädt..." : "Aktualisieren",
+                    () => void loadManagementData(),
+                    { disabled: isManagementLoading },
+                  )}
+                </View>
+
+                {managementFeedback ? (
+                  <ThemedText
+                    style={[
+                      styles.feedback,
+                      managementFeedback.type === "error"
+                        ? { color: Colors.universal.error }
+                        : { color: Colors.universal.primary },
+                    ]}
+                  >
+                    {managementFeedback.message}
+                  </ThemedText>
+                ) : null}
+
+                {isManagementLoading && !managementLoaded ? (
+                  <View
+                    style={[
+                      styles.panel,
+                      styles.loadingPanel,
+                      {
+                        backgroundColor: colors.contrast,
+                        borderColor,
+                      },
+                    ]}
+                  >
+                    <ActivityIndicator color={Colors.universal.primary} />
+                    <ThemedText style={styles.helperText}>
+                      Daten werden geladen...
+                    </ThemedText>
+                  </View>
+                ) : (
+                  <>
+                    <View
+                      style={[
+                        styles.panel,
+                        {
+                          backgroundColor: colors.contrast,
+                          borderColor,
+                        },
+                      ]}
+                    >
+                      <View style={styles.sectionHeaderRow}>
+                        <ThemedText style={styles.panelTitle}>
+                          Autoren
+                        </ThemedText>
                         <ThemedText
                           style={[styles.helperText, { color: mutedTextColor }]}
                         >
-                          {isShared
-                            ? "Gilt für alle Videos"
-                            : "Wird pro Video gesetzt"}
+                          {authors.length} Einträge
                         </ThemedText>
                       </View>
-                      <Switch
-                        value={isShared}
-                        onValueChange={() => toggleSharedField(field.key)}
-                        disabled={isSubmitting}
-                        trackColor={{
-                          false: Colors.light.trackColor,
-                          true: Colors.dark.trackColor,
-                        }}
-                        thumbColor={Colors[colorScheme].thumbColor}
-                      />
+
+                      <View style={styles.inlineForm}>
+                        <TextInput
+                          value={newAuthorName}
+                          onChangeText={(value) => {
+                            setNewAuthorName(value);
+                            if (managementFeedback) setManagementFeedback(null);
+                          }}
+                          placeholder="Neuen Autor hinzufügen"
+                          placeholderTextColor={Colors.universal.grayedOut}
+                          editable={!operationDisabled}
+                          style={[
+                            styles.input,
+                            styles.inlineInput,
+                            {
+                              backgroundColor: inputBackground,
+                              borderColor,
+                              color: colors.text,
+                            },
+                          ]}
+                        />
+                        {renderSmallButton("Hinzufügen", handleAddAuthor, {
+                          filled: true,
+                          disabled: operationDisabled,
+                        })}
+                      </View>
+
+                      <View style={styles.list}>
+                        {authors.map((author) => {
+                          const isEditing = editingAuthorId === author.id;
+                          const videoCount =
+                            authorVideoCounts.get(author.author_name) ?? 0;
+
+                          return (
+                            <View
+                              key={author.id}
+                              style={[
+                                styles.listRow,
+                                { borderBottomColor: mutedBorderColor },
+                              ]}
+                            >
+                              {isEditing ? (
+                                <View style={styles.rowEditContent}>
+                                  <TextInput
+                                    value={authorDraftName}
+                                    onChangeText={setAuthorDraftName}
+                                    placeholder="Autorenname"
+                                    placeholderTextColor={
+                                      Colors.universal.grayedOut
+                                    }
+                                    editable={!operationDisabled}
+                                    style={[
+                                      styles.input,
+                                      {
+                                        backgroundColor: inputBackground,
+                                        borderColor,
+                                        color: colors.text,
+                                      },
+                                    ]}
+                                  />
+                                  <View style={styles.buttonRow}>
+                                    {renderSmallButton(
+                                      "Speichern",
+                                      () => void handleSaveAuthor(author),
+                                      {
+                                        filled: true,
+                                        disabled: operationDisabled,
+                                      },
+                                    )}
+                                    {renderSmallButton(
+                                      "Abbrechen",
+                                      cancelEditAuthor,
+                                      { disabled: operationDisabled },
+                                    )}
+                                  </View>
+                                </View>
+                              ) : (
+                                <>
+                                  <View style={styles.rowTextContent}>
+                                    <ThemedText style={styles.rowTitle}>
+                                      {author.author_name}
+                                    </ThemedText>
+                                    <ThemedText
+                                      style={[
+                                        styles.helperText,
+                                        { color: mutedTextColor },
+                                      ]}
+                                    >
+                                      {author.source === "authors"
+                                        ? `ID ${author.id}`
+                                        : "Aus Videos"}{" "}
+                                      - {videoCount} Video
+                                      {videoCount === 1 ? "" : "s"}
+                                    </ThemedText>
+                                  </View>
+                                  <View style={styles.buttonRow}>
+                                    {renderSmallButton(
+                                      "Bearbeiten",
+                                      () => startEditAuthor(author),
+                                      { disabled: operationDisabled },
+                                    )}
+                                    {renderSmallButton(
+                                      "Löschen",
+                                      () => void handleDeleteAuthor(author),
+                                      {
+                                        danger: true,
+                                        disabled: operationDisabled,
+                                      },
+                                    )}
+                                  </View>
+                                </>
+                              )}
+                            </View>
+                          );
+                        })}
+
+                        {authors.length === 0 ? (
+                          <ThemedText
+                            style={[styles.helperText, { color: mutedTextColor }]}
+                          >
+                            Noch keine Autoren vorhanden.
+                          </ThemedText>
+                        ) : null}
+                      </View>
                     </View>
 
-                    {isShared ? (
+                    <View
+                      style={[
+                        styles.panel,
+                        {
+                          backgroundColor: colors.contrast,
+                          borderColor,
+                        },
+                      ]}
+                    >
+                      <View style={styles.sectionHeaderRow}>
+                        <ThemedText style={styles.panelTitle}>Themen</ThemedText>
+                        <ThemedText
+                          style={[styles.helperText, { color: mutedTextColor }]}
+                        >
+                          {topicRows.length} Einträge
+                        </ThemedText>
+                      </View>
+
+                      <View style={styles.topicGrid}>
+                        {topicRows.map((topicRow) => {
+                          const active = selectedTopic === topicRow.topic;
+
+                          return (
+                            <Pressable
+                              key={topicRow.topic}
+                              onPress={() => handleSelectTopic(topicRow.topic)}
+                              disabled={operationDisabled}
+                              style={({ pressed }) => [
+                                styles.topicPill,
+                                {
+                                  borderColor: active
+                                    ? Colors.universal.primary
+                                    : borderColor,
+                                  backgroundColor: active
+                                    ? "rgba(46,168,83,0.16)"
+                                    : inputBackground,
+                                },
+                                pressed && !operationDisabled && styles.buttonPressed,
+                              ]}
+                            >
+                              <ThemedText style={styles.topicPillText}>
+                                {topicRow.topic} ({topicRow.count})
+                              </ThemedText>
+                            </Pressable>
+                          );
+                        })}
+
+                        {topicRows.length === 0 ? (
+                          <ThemedText
+                            style={[styles.helperText, { color: mutedTextColor }]}
+                          >
+                            Noch keine Themen vorhanden.
+                          </ThemedText>
+                        ) : null}
+                      </View>
+
+                      <View style={styles.inlineForm}>
+                        <TextInput
+                          value={topicDraftName}
+                          onChangeText={setTopicDraftName}
+                          placeholder="Thema auswählen oder neuen Namen schreiben"
+                          placeholderTextColor={Colors.universal.grayedOut}
+                          editable={!operationDisabled && Boolean(selectedTopic)}
+                          style={[
+                            styles.input,
+                            styles.inlineInput,
+                            {
+                              backgroundColor: inputBackground,
+                              borderColor,
+                              color: colors.text,
+                            },
+                          ]}
+                        />
+                        {renderSmallButton("Umbenennen", () => void handleRenameTopic(), {
+                          filled: true,
+                          disabled: operationDisabled || !selectedTopic,
+                        })}
+                        {renderSmallButton("Entfernen", () => void handleRemoveTopic(), {
+                          danger: true,
+                          disabled: operationDisabled || !selectedTopic,
+                        })}
+                      </View>
+                    </View>
+
+                    <View
+                      style={[
+                        styles.panel,
+                        {
+                          backgroundColor: colors.contrast,
+                          borderColor,
+                        },
+                      ]}
+                    >
+                      <View style={styles.sectionHeaderRow}>
+                        <ThemedText style={styles.panelTitle}>Videos</ThemedText>
+                        <ThemedText
+                          style={[styles.helperText, { color: mutedTextColor }]}
+                        >
+                          {filteredManagedVideos.length} von {managedVideos.length}
+                        </ThemedText>
+                      </View>
+
                       <TextInput
-                        value={sharedValues[field.key]}
-                        onChangeText={(value) =>
-                          updateSharedValue(field.key, value)
-                        }
-                        placeholder={field.placeholder}
+                        value={managementSearch}
+                        onChangeText={setManagementSearch}
+                        placeholder="Suchen nach Titel, Autor, Thema, Sprache oder ID"
                         placeholderTextColor={Colors.universal.grayedOut}
-                        keyboardType={field.keyboardType}
-                        autoCapitalize={field.autoCapitalize}
-                        autoCorrect={field.autoCorrect}
-                        editable={!isSubmitting}
+                        editable={!operationDisabled}
                         style={[
                           styles.input,
                           {
@@ -528,107 +1887,114 @@ export default function AddVideo() {
                           },
                         ]}
                       />
-                    ) : null}
-                  </View>
-                );
-              })}
-            </View>
 
-            <View style={styles.videoHeaderRow}>
-              <ThemedText style={styles.panelTitle}>Videos</ThemedText>
-              <Pressable
-                onPress={addVideoRow}
-                disabled={isSubmitting}
-                style={({ pressed }) => [
-                  styles.iconButton,
-                  {
-                    borderColor,
-                    backgroundColor: inputBackground,
-                  },
-                  pressed && !isSubmitting && styles.buttonPressed,
-                ]}
-              >
-                <ThemedText style={styles.iconButtonText}>+</ThemedText>
-              </Pressable>
-            </View>
+                      <View style={styles.list}>
+                        {filteredManagedVideos.map((video) => {
+                          const isEditing = editingVideoId === video.id;
+                          const topics = parseTopics(video.video_topic);
 
-            {videos.map((video, index) => (
-              <View
-                key={video.id}
-                style={[
-                  styles.panel,
-                  styles.videoPanel,
-                  {
-                    backgroundColor: colors.contrast,
-                    borderColor,
-                  },
-                ]}
-              >
-                <View style={styles.videoPanelHeader}>
-                  <ThemedText style={styles.videoTitle}>
-                    Video {index + 1}
-                  </ThemedText>
-                  <Pressable
-                    onPress={() => removeVideoRow(video.id)}
-                    disabled={isSubmitting}
-                    hitSlop={10}
-                    style={({ pressed }) => [
-                      styles.removeButton,
-                      pressed && !isSubmitting && styles.buttonPressed,
-                    ]}
-                  >
-                    <ThemedText style={styles.removeButtonText}>×</ThemedText>
-                  </Pressable>
-                </View>
+                          return (
+                            <View
+                              key={video.id}
+                              style={[
+                                styles.listRow,
+                                styles.videoListRow,
+                                { borderBottomColor: mutedBorderColor },
+                              ]}
+                            >
+                              {isEditing ? (
+                                <View style={styles.rowEditContent}>
+                                  {managedVideoFieldDefinitions.map((field) =>
+                                    renderInput(
+                                      field,
+                                      videoDraft[field.key],
+                                      (value) =>
+                                        updateVideoDraft(field.key, value),
+                                      !operationDisabled,
+                                    ),
+                                  )}
+                                  <View style={styles.buttonRow}>
+                                    {renderSmallButton(
+                                      "Speichern",
+                                      () => void handleSaveVideo(video.id),
+                                      {
+                                        filled: true,
+                                        disabled: operationDisabled,
+                                      },
+                                    )}
+                                    {renderSmallButton(
+                                      "Abbrechen",
+                                      cancelEditVideo,
+                                      { disabled: operationDisabled },
+                                    )}
+                                  </View>
+                                </View>
+                              ) : (
+                                <>
+                                  <View style={styles.rowTextContent}>
+                                    <ThemedText style={styles.rowTitle}>
+                                      {video.title}
+                                    </ThemedText>
+                                    <ThemedText
+                                      style={[
+                                        styles.helperText,
+                                        { color: mutedTextColor },
+                                      ]}
+                                    >
+                                      ID {video.id}
+                                      {video.author_name
+                                        ? ` - ${video.author_name}`
+                                        : ""}
+                                      {video.language_code
+                                        ? ` - ${video.language_code}`
+                                        : ""}
+                                    </ThemedText>
+                                    <ThemedText
+                                      style={[
+                                        styles.helperText,
+                                        { color: mutedTextColor },
+                                      ]}
+                                      numberOfLines={2}
+                                    >
+                                      {topics.length > 0
+                                        ? topics.join(", ")
+                                        : "Kein Thema"}
+                                    </ThemedText>
+                                  </View>
+                                  <View style={styles.buttonRow}>
+                                    {renderSmallButton(
+                                      "Bearbeiten",
+                                      () => startEditVideo(video),
+                                      { disabled: operationDisabled },
+                                    )}
+                                    {renderSmallButton(
+                                      "Löschen",
+                                      () => void handleDeleteVideo(video),
+                                      {
+                                        danger: true,
+                                        disabled: operationDisabled,
+                                      },
+                                    )}
+                                  </View>
+                                </>
+                              )}
+                            </View>
+                          );
+                        })}
 
-                {baseVideoFields.map((field) =>
-                  renderInput(field, video[field.key], (value) =>
-                    updateVideoField(video.id, field.key, value),
-                  ),
+                        {filteredManagedVideos.length === 0 ? (
+                          <ThemedText
+                            style={[styles.helperText, { color: mutedTextColor }]}
+                          >
+                            Keine Videos gefunden.
+                          </ThemedText>
+                        ) : null}
+                      </View>
+                    </View>
+                  </>
                 )}
-
-                {sharedFieldDefinitions
-                  .filter((field) => !sharedFields[field.key])
-                  .map((field) =>
-                    renderInput(field, video[field.key], (value) =>
-                      updateVideoField(video.id, field.key, value),
-                    ),
-                  )}
-              </View>
-            ))}
-
-            {feedback ? (
-              <ThemedText
-                style={[
-                  styles.feedback,
-                  feedback.type === "error"
-                    ? { color: Colors.universal.error }
-                    : { color: Colors.universal.primary },
-                ]}
-              >
-                {feedback.message}
-              </ThemedText>
-            ) : null}
-
-            <Pressable
-              onPress={handleSubmit}
-              disabled={isSubmitting}
-              style={({ pressed }) => [
-                styles.submitButton,
-                isSubmitting && styles.submitButtonDisabled,
-                pressed && !isSubmitting && styles.submitButtonPressed,
-              ]}
-            >
-              {isSubmitting ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <ThemedText style={styles.submitButtonText}>
-                  {videos.filter((video) => !isVideoRowEmpty(video)).length <= 1
-                    ? "Video einfügen"
-                    : "Videos einfügen"}
-                </ThemedText>
-              )}
-            </Pressable>
+              </>
+            )}
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -653,7 +2019,7 @@ const styles = StyleSheet.create({
   },
   content: {
     width: "100%",
-    maxWidth: 720,
+    maxWidth: 880,
     alignSelf: "center",
     gap: 16,
   },
@@ -668,6 +2034,32 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
   },
+  segmentedControl: {
+    minHeight: 48,
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 4,
+    flexDirection: "row",
+    gap: 4,
+  },
+  segmentButton: {
+    flex: 1,
+    minHeight: 38,
+    borderRadius: 7,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 12,
+  },
+  segmentButtonActive: {
+    backgroundColor: Colors.universal.primary,
+  },
+  segmentButtonText: {
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  segmentButtonTextActive: {
+    color: "#fff",
+  },
   panel: {
     borderWidth: 1,
     borderRadius: 8,
@@ -678,6 +2070,14 @@ const styles = StyleSheet.create({
     fontSize: 18,
     lineHeight: 24,
     fontWeight: "700",
+  },
+  sectionHeaderRow: {
+    minHeight: 32,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    flexWrap: "wrap",
   },
   sharedField: {
     borderBottomWidth: StyleSheet.hairlineWidth,
@@ -713,6 +2113,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: Platform.OS === "web" ? 10 : 8,
     fontSize: 16,
+  },
+  inlineInput: {
+    flex: 1,
+    minWidth: 220,
   },
   videoHeaderRow: {
     minHeight: 44,
@@ -786,5 +2190,101 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: 16,
     fontWeight: "700",
+  },
+  managementHeaderRow: {
+    minHeight: 44,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    flexWrap: "wrap",
+  },
+  loadingPanel: {
+    minHeight: 120,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  inlineForm: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    flexWrap: "wrap",
+  },
+  list: {
+    gap: 0,
+  },
+  listRow: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingVertical: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    flexWrap: "wrap",
+  },
+  videoListRow: {
+    alignItems: "flex-start",
+  },
+  rowTextContent: {
+    flex: 1,
+    gap: 4,
+    minWidth: 180,
+  },
+  rowEditContent: {
+    flex: 1,
+    gap: 12,
+  },
+  rowTitle: {
+    fontSize: 15,
+    lineHeight: 21,
+    fontWeight: "700",
+  },
+  buttonRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: 8,
+    flexWrap: "wrap",
+  },
+  smallButton: {
+    minHeight: 36,
+    borderWidth: 1,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 12,
+  },
+  smallButtonText: {
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: "700",
+  },
+  primarySmallButton: {
+    borderColor: Colors.universal.primary,
+    backgroundColor: Colors.universal.primary,
+  },
+  primarySmallButtonText: {
+    color: "#fff",
+  },
+  disabledButton: {
+    opacity: 0.55,
+  },
+  topicGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  topicPill: {
+    minHeight: 34,
+    borderWidth: 1,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 10,
+  },
+  topicPillText: {
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: "600",
   },
 });
