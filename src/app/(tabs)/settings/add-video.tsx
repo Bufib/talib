@@ -424,8 +424,10 @@ export default function AddVideo() {
     mode?: string | string[];
     editVideoId?: string | string[];
     topic?: string | string[];
+    authNonce?: string | string[];
   }>();
   const requestedMode = firstSearchParam(routeParams.mode);
+  const authResetKey = firstSearchParam(routeParams.authNonce) ?? "direct";
   const requestedEditVideoId = parseOptionalId(
     firstSearchParam(routeParams.editVideoId),
   );
@@ -452,6 +454,10 @@ export default function AddVideo() {
   const [videos, setVideos] = useState<VideoRow[]>(() => [createVideoRow()]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
+  const [isAdminUnlocked, setIsAdminUnlocked] = useState(false);
+  const [passwordValue, setPasswordValue] = useState("");
+  const [passwordFeedback, setPasswordFeedback] = useState<string | null>(null);
+  const [isPasswordChecking, setIsPasswordChecking] = useState(false);
   const [managedVideos, setManagedVideos] = useState<ManagedVideo[]>([]);
   const [authors, setAuthors] = useState<AuthorRow[]>([]);
   const [managementLoaded, setManagementLoaded] = useState(false);
@@ -548,16 +554,23 @@ export default function AddVideo() {
   }, []);
 
   useEffect(() => {
-    if (mode === "manage" && !managementLoaded) {
+    if (mode === "manage" && isAdminUnlocked && !managementLoaded) {
       void loadManagementData();
     }
-  }, [loadManagementData, managementLoaded, mode]);
+  }, [isAdminUnlocked, loadManagementData, managementLoaded, mode]);
 
   useEffect(() => {
     if (shouldOpenManagement) {
       setMode("manage");
     }
   }, [shouldOpenManagement]);
+
+  useEffect(() => {
+    setIsAdminUnlocked(false);
+    setPasswordValue("");
+    setPasswordFeedback(null);
+    handledShortcutRef.current = null;
+  }, [authResetKey]);
 
   const authorVideoCounts = useMemo(() => {
     const counts = new Map<string, number>();
@@ -820,6 +833,47 @@ export default function AddVideo() {
     }
   };
 
+  const handleUnlockAdmin = async () => {
+    if (isPasswordChecking) return;
+
+    if (!passwordValue) {
+      setPasswordFeedback("Bitte das Passwort eingeben.");
+      return;
+    }
+
+    const submittedPassword = passwordValue;
+
+    setIsPasswordChecking(true);
+    setPasswordFeedback(null);
+
+    try {
+      const { data, error } = await supabase
+        .from("password")
+        .select("id")
+        .eq("password", submittedPassword)
+        .limit(1);
+
+      if (error) throw error;
+
+      setPasswordValue("");
+
+      if ((data ?? []).length === 0) {
+        setPasswordFeedback("Das Passwort ist falsch.");
+        return;
+      }
+
+      setIsAdminUnlocked(true);
+      setPasswordFeedback(null);
+    } catch (error) {
+      setPasswordValue("");
+      setPasswordFeedback(
+        getErrorMessage(error, "Das Passwort konnte nicht geprüft werden."),
+      );
+    } finally {
+      setIsPasswordChecking(false);
+    }
+  };
+
   const handleAddAuthor = async () => {
     if (operationDisabled) return;
 
@@ -1050,7 +1104,7 @@ export default function AddVideo() {
   };
 
   useEffect(() => {
-    if (!managementLoaded || !shortcutKey) return;
+    if (!isAdminUnlocked || !managementLoaded || !shortcutKey) return;
     if (handledShortcutRef.current === shortcutKey) return;
 
     setMode("manage");
@@ -1086,6 +1140,7 @@ export default function AddVideo() {
       handledShortcutRef.current = shortcutKey;
     }
   }, [
+    isAdminUnlocked,
     managedVideos,
     managementLoaded,
     requestedEditVideoId,
@@ -1429,6 +1484,102 @@ export default function AddVideo() {
       </Pressable>
     );
   };
+
+  if (!isAdminUnlocked) {
+    return (
+      <SafeAreaView
+        style={[styles.safeArea, { backgroundColor: colors.background }]}
+        edges={["bottom"]}
+      >
+        <Stack.Screen options={{ headerTitle: "Video-Datenbank" }} />
+
+        <KeyboardAvoidingView
+          style={styles.keyboardView}
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+        >
+          <ScrollView
+            style={styles.scrollView}
+            contentContainerStyle={styles.scrollContent}
+            keyboardShouldPersistTaps="handled"
+            contentInsetAdjustmentBehavior="automatic"
+          >
+            <View style={styles.content}>
+              <View style={styles.titleBlock}>
+                <ThemedText type="title" style={styles.title}>
+                  Passwort erforderlich
+                </ThemedText>
+                <ThemedText style={[styles.subtitle, { color: mutedTextColor }]}>
+                  Bitte das Admin-Passwort eingeben.
+                </ThemedText>
+              </View>
+
+              <View
+                style={[
+                  styles.panel,
+                  {
+                    backgroundColor: colors.contrast,
+                    borderColor,
+                  },
+                ]}
+              >
+                <View style={styles.field}>
+                  <ThemedText style={styles.label}>Passwort</ThemedText>
+                  <TextInput
+                    value={passwordValue}
+                    onChangeText={(value) => {
+                      setPasswordValue(value);
+                      if (passwordFeedback) setPasswordFeedback(null);
+                    }}
+                    placeholder="Passwort"
+                    placeholderTextColor={Colors.universal.grayedOut}
+                    secureTextEntry
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    editable={!isPasswordChecking}
+                    onSubmitEditing={() => void handleUnlockAdmin()}
+                    style={[
+                      styles.input,
+                      {
+                        backgroundColor: inputBackground,
+                        borderColor,
+                        color: colors.text,
+                      },
+                    ]}
+                  />
+                </View>
+
+                {passwordFeedback ? (
+                  <ThemedText
+                    style={[styles.feedback, { color: Colors.universal.error }]}
+                  >
+                    {passwordFeedback}
+                  </ThemedText>
+                ) : null}
+
+                <Pressable
+                  onPress={() => void handleUnlockAdmin()}
+                  disabled={isPasswordChecking}
+                  style={({ pressed }) => [
+                    styles.submitButton,
+                    isPasswordChecking && styles.submitButtonDisabled,
+                    pressed && !isPasswordChecking && styles.submitButtonPressed,
+                  ]}
+                >
+                  {isPasswordChecking ? (
+                    <ActivityIndicator color="#fff" />
+                  ) : (
+                    <ThemedText style={styles.submitButtonText}>
+                      Entsperren
+                    </ThemedText>
+                  )}
+                </Pressable>
+              </View>
+            </View>
+          </ScrollView>
+        </KeyboardAvoidingView>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView

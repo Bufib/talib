@@ -240,6 +240,7 @@ export default function VideoGridList({
           params: {
             mode: "manage",
             topic: section.title,
+            authNonce: String(Date.now()),
           },
         });
         return;

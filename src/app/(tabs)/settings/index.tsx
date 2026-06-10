@@ -8,7 +8,7 @@ import useNotificationStore from "../../../../stores/notificationStore";
 import handleOpenExternalUrl from "../../../../utils/handleOpenExternalUrl";
 import Constants from "expo-constants";
 import { Image } from "expo-image";
-import { type Href, router } from "expo-router";
+import { router } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -32,7 +32,6 @@ import { useIsMobileWeb } from "@/hooks/useIsMobileWeb";
 
 const IS_WEB = Platform.OS === "web";
 const WEB_TAB_BAR_TOP_OFFSET = 80;
-const ADD_VIDEO_ROUTE = "/settings/add-video" as Href;
 
 const Settings = () => {
   const colorScheme = useColorScheme();
@@ -96,7 +95,10 @@ const Settings = () => {
     if (titleTapCountRef.current >= 10) {
       titleTapCountRef.current = 0;
       titleTapResetTimeoutRef.current = null;
-      router.push(ADD_VIDEO_ROUTE);
+      router.push({
+        pathname: "/settings/add-video",
+        params: { authNonce: String(Date.now()) },
+      });
       return;
     }
 

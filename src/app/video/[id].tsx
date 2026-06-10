@@ -188,6 +188,7 @@ export default function VideoScreen() {
         params: {
           mode: "manage",
           editVideoId: String(video.id),
+          authNonce: String(Date.now()),
         },
       });
       return;
