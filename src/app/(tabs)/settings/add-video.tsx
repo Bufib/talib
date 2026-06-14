@@ -105,6 +105,7 @@ type FieldDefinition<Key extends string> = {
 type PreparedVideo = {
   title: string;
   authorName: string | null;
+  languageCode: string | null;
   payload: VideoInsertPayload;
 };
 
@@ -240,8 +241,16 @@ function getErrorMessage(
   return fallback;
 }
 
-function getDuplicateKey(title: string, authorName: string | null) {
-  return `${authorName ?? "NO_AUTHOR"}::${title.toLocaleLowerCase("de")}`;
+function getDuplicateKey(
+  title: string,
+  authorName: string | null,
+  languageCode: string | null,
+) {
+  return [
+    languageCode ?? "NO_LANGUAGE",
+    authorName ?? "NO_AUTHOR",
+    title.toLocaleLowerCase("de"),
+  ].join("::");
 }
 
 function normalizeAuthorNameForComparison(authorName: string) {
@@ -731,15 +740,22 @@ export default function AddVideo() {
         rowLabel,
       );
 
-      const duplicateKey = getDuplicateKey(payload.title, payload.author_name);
+      const duplicateKey = getDuplicateKey(
+        payload.title,
+        payload.author_name,
+        payload.language_code,
+      );
       if (seenVideos.has(duplicateKey)) {
-        throw new Error(`${rowLabel}: Dieser Titel ist für denselben Autor doppelt.`);
+        throw new Error(
+          `${rowLabel}: Dieser Titel ist für denselben Autor und dieselbe Sprache doppelt.`,
+        );
       }
       seenVideos.add(duplicateKey);
 
       return {
         title: payload.title,
         authorName: payload.author_name,
+        languageCode: payload.language_code,
         payload,
       };
     });
@@ -757,6 +773,10 @@ export default function AddVideo() {
         ? duplicateRequest.eq("author_name", video.authorName)
         : duplicateRequest.is("author_name", null);
 
+      duplicateRequest = video.languageCode
+        ? duplicateRequest.eq("language_code", video.languageCode)
+        : duplicateRequest.is("language_code", null);
+
       const { data: duplicateRows, error: duplicateError } =
         await duplicateRequest;
 
@@ -764,7 +784,7 @@ export default function AddVideo() {
 
       if ((duplicateRows ?? []).length > 0) {
         throw new Error(
-          `"${video.title}" existiert bereits für denselben Autor.`,
+          `"${video.title}" existiert bereits für denselben Autor in derselben Sprache.`,
         );
       }
     }
