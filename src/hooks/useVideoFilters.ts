@@ -2,7 +2,11 @@ import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import { supabase } from "../../utils/supabase";
-import { parseTopics } from "../../utils/videoTopics";
+import {
+  getVideoTopicNames,
+  normalizeVideoRows,
+  VIDEO_WITH_TOPICS_SELECT,
+} from "../../utils/videoTopics";
 
 type UseVideoFiltersArgs = {
   language: string | null;
@@ -23,18 +27,12 @@ const EMPTY_FILTER_PAIRS: FilterPair[] = [];
 async function fetchFilterPairs(): Promise<FilterPair[]> {
   const { data, error } = await supabase
     .from("videos")
-    .select("language_code, video_topic, author_name");
+    .select(VIDEO_WITH_TOPICS_SELECT);
 
   if (error) throw error;
 
-  type Row = {
-    language_code: string | null;
-    video_topic: unknown;
-    author_name: string | null;
-  };
-
-  return ((data ?? []) as unknown as Row[]).flatMap((row): FilterPair[] => {
-    const topics = parseTopics(row.video_topic);
+  return normalizeVideoRows(data).flatMap((row): FilterPair[] => {
+    const topics = getVideoTopicNames(row);
     const language = row.language_code?.trim() || null;
     const author = row.author_name ?? null;
 

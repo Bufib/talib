@@ -3,7 +3,7 @@ import { Colors } from "@/constants/Colors";
 import type { VideoType } from "@/constants/Types";
 import { useColorScheme } from "@/hooks/useColorScheme";
 import { useLanguage } from "../../contexts/LanguageContext";
-import { parseTopics } from "../../utils/videoTopics";
+import { getVideoTopicNames } from "../../utils/videoTopics";
 import { router } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
@@ -118,7 +118,7 @@ export default function VideoGridList({
     const sectionsByKey = new Map<string, TopicVideoSection>();
 
     for (const video of videos) {
-      const topicNames = parseTopics(video.video_topic);
+      const topicNames = getVideoTopicNames(video);
       const topics =
         topicNames.length > 0
           ? Array.from(new Set(topicNames))

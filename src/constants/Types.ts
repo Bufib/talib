@@ -36,6 +36,12 @@ export type UseGradientOptionsType = {
 };
 
 // Videos
+export type TopicType = {
+  id: number;
+  name: string;
+  parent_topic_id: number | null;
+};
+
 export type VideoType = {
   id: number;
   title: string;
@@ -44,6 +50,7 @@ export type VideoType = {
   end_time: number | null;
   language_code: string | null;
   video_topic: string | null;
+  topics?: TopicType[];
   author_name: string | null;
   created_at: string;
 };

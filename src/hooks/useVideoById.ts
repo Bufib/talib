@@ -1,6 +1,10 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { VideoType } from "@/constants/Types";
 import { supabase } from "../../utils/supabase";
+import {
+  normalizeVideoRow,
+  VIDEO_WITH_TOPICS_SELECT,
+} from "../../utils/videoTopics";
 
 function findCachedVideoById(
   id: number | null | undefined,
@@ -50,13 +54,13 @@ export function useVideoById(id: number | null | undefined) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("videos")
-        .select("*")
+        .select(VIDEO_WITH_TOPICS_SELECT)
         .eq("id", id)
         .single();
 
       if (error) throw error;
 
-      return data as unknown as VideoType;
+      return normalizeVideoRow(data);
     },
     placeholderData: () => {
       const cachedVideoQueries = queryClient

@@ -26,8 +26,15 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import Toast from "react-native-toast-message";
 
+import type { TopicType } from "@/constants/Types";
 import { supabase } from "../../../../utils/supabase";
-import { parseTopics } from "../../../../utils/videoTopics";
+import {
+  getVideoTopicNames,
+  getVideoTopics,
+  normalizeVideoRows,
+  parseTopics,
+  VIDEO_WITH_TOPICS_SELECT,
+} from "../../../../utils/videoTopics";
 import { getYoutubeVideoId, parseYoutubeTime } from "../../../../utils/youtube";
 
 type ViewMode = "insert" | "manage";
@@ -60,6 +67,7 @@ type ManagedVideo = {
   created_at: string;
   language_code: string | null;
   video_topic: string | null;
+  topics?: TopicType[];
   author_name: string | null;
   start_time: number | null;
   end_time: number | null;
@@ -73,6 +81,7 @@ type AuthorRow = {
 };
 
 type TopicRow = {
+  id: number;
   topic: string;
   count: number;
 };
@@ -86,10 +95,14 @@ type VideoInsertPayload = {
   title: string;
   youtube_url: string;
   language_code: string | null;
-  video_topic: string | null;
   author_name: string | null;
   start_time: number | null;
   end_time: number | null;
+};
+
+type PreparedVideoPayload = {
+  payload: VideoInsertPayload;
+  topicNames: string[];
 };
 
 type FieldDefinition<Key extends string> = {
@@ -106,6 +119,7 @@ type PreparedVideo = {
   title: string;
   authorName: string | null;
   languageCode: string | null;
+  topicNames: string[];
   payload: VideoInsertPayload;
 };
 
@@ -206,7 +220,7 @@ function createVideoDraft(video: ManagedVideo): VideoDraft {
     youtubeUrl: video.youtube_url ?? "",
     authorName: video.author_name ?? "",
     languageCode: video.language_code ?? "",
-    videoTopic: video.video_topic ?? "",
+    videoTopic: serializeTopicList(getVideoTopicNames(video)) ?? "",
     startTime: video.start_time == null ? "" : String(video.start_time),
     endTime: video.end_time == null ? "" : String(video.end_time),
   };
@@ -302,12 +316,12 @@ function mergeAuthorsFromSources(
 function buildVideoPayloadFromDraft(
   draft: VideoDraft,
   rowLabel = "Video",
-): VideoInsertPayload {
+): PreparedVideoPayload {
   const title = draft.title.trim();
   const youtubeUrl = draft.youtubeUrl.trim();
   const authorName = optionalText(draft.authorName);
   const languageCode = optionalText(draft.languageCode)?.toLowerCase() ?? null;
-  const videoTopic = optionalText(draft.videoTopic);
+  const topicNames = normalizeTopicList(parseTopics(draft.videoTopic));
 
   if (!title || !youtubeUrl) {
     throw new Error(`${rowLabel}: Titel und YouTube URL sind Pflicht.`);
@@ -327,13 +341,15 @@ function buildVideoPayloadFromDraft(
   }
 
   return {
-    title,
-    youtube_url: youtubeUrl,
-    language_code: languageCode,
-    video_topic: videoTopic,
-    author_name: authorName,
-    start_time: startTime,
-    end_time: endTime,
+    payload: {
+      title,
+      youtube_url: youtubeUrl,
+      language_code: languageCode,
+      author_name: authorName,
+      start_time: startTime,
+      end_time: endTime,
+    },
+    topicNames,
   };
 }
 
@@ -374,6 +390,53 @@ async function ensureAuthorsExist(authorNames: (string | null)[]) {
   );
 
   if (error) throw error;
+}
+
+async function replaceVideoTopics(videoId: number, topicNames: string[]) {
+  const normalizedTopicNames = normalizeTopicList(topicNames);
+
+  const { error: deleteError } = await supabase
+    .from("video_topics")
+    .delete()
+    .eq("video_id", videoId);
+
+  if (deleteError) throw deleteError;
+
+  if (normalizedTopicNames.length === 0) return;
+
+  const topicPayloads = normalizedTopicNames.map((name) => ({ name }));
+  const { error: upsertError } = await supabase
+    .from("topics")
+    .upsert(topicPayloads, { onConflict: "name" });
+
+  if (upsertError) throw upsertError;
+
+  const { data: topicRows, error: topicsError } = await supabase
+    .from("topics")
+    .select("id, name")
+    .in("name", normalizedTopicNames);
+
+  if (topicsError) throw topicsError;
+
+  const rows = (topicRows ?? [])
+    .filter(
+      (topic): topic is { id: number; name: string } =>
+        typeof topic.id === "number" && typeof topic.name === "string",
+    )
+    .map((topic) => ({
+      video_id: videoId,
+      topic_id: topic.id,
+    }));
+
+  if (rows.length !== normalizedTopicNames.length) {
+    throw new Error("Nicht alle Themen konnten angelegt werden.");
+  }
+
+  const { error: insertError } = await supabase
+    .from("video_topics")
+    .insert(rows);
+
+  if (insertError) throw insertError;
 }
 
 function confirmDestructiveAction(title: string, message: string) {
@@ -517,16 +580,16 @@ export default function AddVideo() {
           .order("author_name", { ascending: true }),
         supabase
           .from("videos")
-          .select(
-            "id, title, youtube_url, created_at, language_code, video_topic, author_name, start_time, end_time",
-          )
+          .select(VIDEO_WITH_TOPICS_SELECT)
           .order("created_at", { ascending: false })
           .order("id", { ascending: false }),
       ]);
 
       if (videosResult.error) throw videosResult.error;
 
-      const nextManagedVideos = (videosResult.data ?? []) as ManagedVideo[];
+      const nextManagedVideos = normalizeVideoRows(
+        videosResult.data,
+      ) as ManagedVideo[];
       const nextAuthors = mergeAuthorsFromSources(
         authorsResult.error
           ? []
@@ -602,17 +665,22 @@ export default function AddVideo() {
   }, [authors]);
 
   const topicRows = useMemo<TopicRow[]>(() => {
-    const counts = new Map<string, number>();
+    const counts = new Map<string, TopicRow>();
 
     for (const video of managedVideos) {
-      for (const topic of parseTopics(video.video_topic)) {
-        counts.set(topic, (counts.get(topic) ?? 0) + 1);
+      for (const topic of getVideoTopics(video)) {
+        const existing = counts.get(topic.name);
+        counts.set(topic.name, {
+          id: existing?.id && existing.id > 0 ? existing.id : topic.id,
+          topic: topic.name,
+          count: (existing?.count ?? 0) + 1,
+        });
       }
     }
 
-    return [...counts.entries()]
-      .map(([topic, count]) => ({ topic, count }))
-      .sort((a, b) => a.topic.localeCompare(b.topic, "de"));
+    return [...counts.values()].sort((a, b) =>
+      a.topic.localeCompare(b.topic, "de"),
+    );
   }, [managedVideos]);
 
   useEffect(() => {
@@ -632,7 +700,7 @@ export default function AddVideo() {
 
     return managedVideos.filter((video) => {
       const matchesSelectedTopic =
-        !selectedTopic || parseTopics(video.video_topic).includes(selectedTopic);
+        !selectedTopic || getVideoTopicNames(video).includes(selectedTopic);
 
       if (!matchesSelectedTopic) return false;
       if (!normalizedSearch) return true;
@@ -643,7 +711,7 @@ export default function AddVideo() {
         video.youtube_url,
         video.author_name ?? "",
         video.language_code ?? "",
-        video.video_topic ?? "",
+        getVideoTopicNames(video).join(", "),
       ];
 
       return values.some((value) =>
@@ -727,7 +795,7 @@ export default function AddVideo() {
 
     return activeVideos.map((video, index): PreparedVideo => {
       const rowLabel = `Video ${index + 1}`;
-      const payload = buildVideoPayloadFromDraft(
+      const preparedPayload = buildVideoPayloadFromDraft(
         {
           title: video.title,
           youtubeUrl: video.youtubeUrl,
@@ -739,6 +807,7 @@ export default function AddVideo() {
         },
         rowLabel,
       );
+      const payload = preparedPayload.payload;
 
       const duplicateKey = getDuplicateKey(
         payload.title,
@@ -756,6 +825,7 @@ export default function AddVideo() {
         title: payload.title,
         authorName: payload.author_name,
         languageCode: payload.language_code,
+        topicNames: preparedPayload.topicNames,
         payload,
       };
     });
@@ -821,10 +891,21 @@ export default function AddVideo() {
 
       if (insertError) throw insertError;
 
+      const insertedRows = (insertedVideos ?? []) as { id: number }[];
+      if (insertedRows.length !== preparedVideos.length) {
+        throw new Error("Nicht alle eingefügten Videos wurden zurückgegeben.");
+      }
+
+      await Promise.all(
+        insertedRows.map((video, index) =>
+          replaceVideoTopics(video.id, preparedVideos[index].topicNames),
+        ),
+      );
+
       await invalidateVideoCaches();
       if (managementLoaded) await loadManagementData();
 
-      const insertedCount = insertedVideos?.length ?? preparedVideos.length;
+      const insertedCount = insertedRows.length;
       const message =
         insertedCount === 1
           ? "1 Video wurde eingefügt."
@@ -1171,9 +1252,9 @@ export default function AddVideo() {
   const handleSaveVideo = async (videoId: number) => {
     if (operationDisabled) return;
 
-    let payload: VideoInsertPayload;
+    let preparedPayload: PreparedVideoPayload;
     try {
-      payload = buildVideoPayloadFromDraft(videoDraft);
+      preparedPayload = buildVideoPayloadFromDraft(videoDraft);
     } catch (error) {
       setManagementFeedback({
         type: "error",
@@ -1181,6 +1262,7 @@ export default function AddVideo() {
       });
       return;
     }
+    const payload = preparedPayload.payload;
 
     setIsManagementSaving(true);
     setManagementFeedback(null);
@@ -1194,6 +1276,8 @@ export default function AddVideo() {
         .eq("id", videoId);
 
       if (error) throw error;
+
+      await replaceVideoTopics(videoId, preparedPayload.topicNames);
 
       await invalidateVideoCaches();
       await loadManagementData();
@@ -1306,30 +1390,28 @@ export default function AddVideo() {
       return;
     }
 
-    const affectedVideos = managedVideos.filter((video) =>
-      parseTopics(video.video_topic).includes(currentTopic),
+    const currentTopicRow = topicRows.find(
+      (topicRow) => topicRow.topic === currentTopic,
     );
+    const affectedCount = currentTopicRow?.count ?? 0;
 
     setIsManagementSaving(true);
     setManagementFeedback(null);
 
     try {
-      await Promise.all(
-        affectedVideos.map(async (video) => {
-          const nextTopicValue = serializeTopicList(
-            parseTopics(video.video_topic).map((topic) =>
-              topic === currentTopic ? nextTopic : topic,
-            ),
-          );
+      const topicRequest =
+        currentTopicRow && currentTopicRow.id > 0
+          ? supabase
+              .from("topics")
+              .update({ name: nextTopic })
+              .eq("id", currentTopicRow.id)
+          : supabase
+              .from("topics")
+              .update({ name: nextTopic })
+              .eq("name", currentTopic);
 
-          const { error } = await supabase
-            .from("videos")
-            .update({ video_topic: nextTopicValue })
-            .eq("id", video.id);
-
-          if (error) throw error;
-        }),
-      );
+      const { error } = await topicRequest;
+      if (error) throw error;
 
       await invalidateVideoCaches();
       await loadManagementData();
@@ -1338,8 +1420,8 @@ export default function AddVideo() {
       setTopicDraftName(nextTopic);
       setManagementFeedback({
         type: "success",
-        message: `"${currentTopic}" wurde in ${affectedVideos.length} Video${
-          affectedVideos.length === 1 ? "" : "s"
+        message: `"${currentTopic}" wurde in ${affectedCount} Video${
+          affectedCount === 1 ? "" : "s"
         } umbenannt.`,
       });
       Toast.show({
@@ -1348,7 +1430,9 @@ export default function AddVideo() {
         text2: nextTopic,
       });
     } catch (error) {
-      const message = getErrorMessage(error);
+      const message = isUniqueConstraintError(error)
+        ? `"${nextTopic}" existiert bereits.`
+        : getErrorMessage(error);
       setManagementFeedback({ type: "error", message });
       Toast.show({
         type: "error",
@@ -1372,14 +1456,15 @@ export default function AddVideo() {
       return;
     }
 
-    const affectedVideos = managedVideos.filter((video) =>
-      parseTopics(video.video_topic).includes(currentTopic),
+    const currentTopicRow = topicRows.find(
+      (topicRow) => topicRow.topic === currentTopic,
     );
+    const affectedCount = currentTopicRow?.count ?? 0;
 
     const confirmed = await confirmDestructiveAction(
       "Thema entfernen?",
-      `"${currentTopic}" wird aus ${affectedVideos.length} Video${
-        affectedVideos.length === 1 ? "" : "s"
+      `"${currentTopic}" wird aus ${affectedCount} Video${
+        affectedCount === 1 ? "" : "s"
       } entfernt. Die Videos bleiben erhalten.`,
     );
 
@@ -1389,22 +1474,31 @@ export default function AddVideo() {
     setManagementFeedback(null);
 
     try {
-      await Promise.all(
-        affectedVideos.map(async (video) => {
-          const nextTopicValue = serializeTopicList(
-            parseTopics(video.video_topic).filter(
-              (topic) => topic !== currentTopic,
-            ),
-          );
+      let topicId = currentTopicRow && currentTopicRow.id > 0
+        ? currentTopicRow.id
+        : null;
 
-          const { error } = await supabase
-            .from("videos")
-            .update({ video_topic: nextTopicValue })
-            .eq("id", video.id);
+      if (!topicId) {
+        const { data: topicData, error: topicError } = await supabase
+          .from("topics")
+          .select("id")
+          .eq("name", currentTopic)
+          .single();
 
-          if (error) throw error;
-        }),
-      );
+        if (topicError) throw topicError;
+        topicId = (topicData as { id: number } | null)?.id ?? null;
+      }
+
+      if (!topicId) {
+        throw new Error(`"${currentTopic}" wurde nicht gefunden.`);
+      }
+
+      const { error } = await supabase
+        .from("video_topics")
+        .delete()
+        .eq("topic_id", topicId);
+
+      if (error) throw error;
 
       await invalidateVideoCaches();
       await loadManagementData();
@@ -2179,7 +2273,7 @@ export default function AddVideo() {
                       <View style={styles.list}>
                         {filteredManagedVideos.map((video) => {
                           const isEditing = editingVideoId === video.id;
-                          const topics = parseTopics(video.video_topic);
+                          const topics = getVideoTopicNames(video);
 
                           return (
                             <View

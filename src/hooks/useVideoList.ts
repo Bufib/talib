@@ -3,7 +3,11 @@ import { useQuery } from "@tanstack/react-query";
 
 import { VideoType } from "@/constants/Types";
 import { supabase } from "../../utils/supabase";
-import { matchesTopic } from "../../utils/videoTopics";
+import {
+  matchesTopic,
+  normalizeVideoRows,
+  VIDEO_WITH_TOPICS_SELECT,
+} from "../../utils/videoTopics";
 
 type UseVideoListArgs = {
   language: string | null;
@@ -25,13 +29,13 @@ export function useVideoList({
     queryFn: async () => {
       const { data, error } = await supabase
         .from("videos")
-        .select("*")
+        .select(VIDEO_WITH_TOPICS_SELECT)
         .order("created_at", { ascending: false })
         .order("id", { ascending: false });
 
       if (error) throw error;
 
-      return (data ?? []) as unknown as VideoType[];
+      return normalizeVideoRows(data) as VideoType[];
     },
     retry: 3,
     staleTime: 12 * 60 * 60 * 1000,
@@ -45,7 +49,7 @@ export function useVideoList({
       (video) =>
         (language === null || video.language_code === language) &&
         (!selectedAuthor || video.author_name === selectedAuthor) &&
-        (!selectedTopic || matchesTopic(video.video_topic, selectedTopic)) &&
+        (!selectedTopic || matchesTopic(video, selectedTopic)) &&
         (!normalizedSearchQuery ||
           video.title.toLocaleLowerCase().includes(normalizedSearchQuery)),
     );

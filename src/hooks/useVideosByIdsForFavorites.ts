@@ -2,6 +2,10 @@ import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { VideoType } from "@/constants/Types";
 import { supabase } from "../../utils/supabase";
+import {
+  normalizeVideoRows,
+  VIDEO_WITH_TOPICS_SELECT,
+} from "../../utils/videoTopics";
 
 type UseVideosByIdsArgs = {
   ids: number[];
@@ -20,7 +24,7 @@ export function useVideosByIdsForFavorites({
     queryFn: async () => {
       let request = supabase
         .from("videos")
-        .select("*")
+        .select(VIDEO_WITH_TOPICS_SELECT)
         .in("id", ids)
         .order("created_at", { ascending: false })
         .order("id", { ascending: false });
@@ -35,7 +39,7 @@ export function useVideosByIdsForFavorites({
         throw error;
       }
 
-      return (data ?? []) as unknown as VideoType[];
+      return normalizeVideoRows(data) as VideoType[];
     },
     retry: 3,
     staleTime: 12 * 60 * 60 * 1000,
