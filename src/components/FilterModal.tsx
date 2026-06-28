@@ -4,7 +4,7 @@ import { useColorScheme } from "@/hooks/useColorScheme";
 import { useVideoFilters } from "@/hooks/useVideoFilters";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
-import React, { useCallback, useEffect } from "react";
+import React, { useCallback, useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Platform,
@@ -23,6 +23,32 @@ import { getLanguageLabel } from "../../utils/languageLabel";
 
 const IS_WEB = Platform.OS === "web";
 const COMPACT_WEB_BREAKPOINT = 480;
+
+type TopicFilterGroup = {
+  key: string;
+  title: string | null;
+  topics: {
+    label: string;
+    value: string;
+    isDirectRoot: boolean;
+  }[];
+};
+
+function splitTopicLabel(topic: string) {
+  const parts = topic
+    .split(">")
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  if (parts.length <= 1) {
+    return { parent: null, child: topic.trim() };
+  }
+
+  return {
+    parent: parts.slice(0, parts.length - 1).join(" > "),
+    child: parts[parts.length - 1],
+  };
+}
 
 export default function FilterModal() {
   const { t } = useTranslation();
@@ -69,6 +95,50 @@ export default function FilterModal() {
     selectedTopic !== null ||
     selectedAuthor !== null ||
     selectedLanguage !== lang;
+
+  const topicGroups = useMemo<TopicFilterGroup[]>(() => {
+    const groupsByParent = new Map<string, TopicFilterGroup>();
+
+    for (const topic of availableTopics) {
+      const { parent, child } = splitTopicLabel(topic);
+      const groupTitle = parent ?? child;
+      const topicItem = {
+        label: child,
+        value: topic,
+        isDirectRoot: !parent,
+      };
+      const existing = groupsByParent.get(groupTitle);
+
+      if (existing) {
+        existing.topics.push(topicItem);
+      } else {
+        groupsByParent.set(groupTitle, {
+          key: groupTitle,
+          title: groupTitle,
+          topics: [topicItem],
+        });
+      }
+    }
+
+    const sortTopicItems = (items: TopicFilterGroup["topics"]) =>
+      items.sort((a, b) => {
+        if (a.isDirectRoot !== b.isDirectRoot) {
+          return a.isDirectRoot ? -1 : 1;
+        }
+
+        return a.label.localeCompare(b.label, lang);
+      });
+
+    return [...groupsByParent.values()]
+      .map((group) => ({
+        ...group,
+        title: group.topics.some((topic) => !topic.isDirectRoot)
+          ? group.title
+          : null,
+        topics: sortTopicItems(group.topics),
+      }))
+      .sort((a, b) => (a.title ?? "").localeCompare(b.title ?? "", lang));
+  }, [availableTopics, lang]);
 
   const panelBg = isDark ? "#1e2a3a" : "#ffffff";
   const sectionLabelColor = isDark ? "#8899aa" : "#888";
@@ -197,31 +267,56 @@ export default function FilterModal() {
                       {t("allTopics")}
                     </Text>
                   </TouchableOpacity>
-                  {availableTopics.map((topic) => (
-                    <TouchableOpacity
-                      key={topic}
-                      style={[
-                        styles.chip,
-                        { backgroundColor: chipBg, borderColor: chipBorder },
-                        selectedTopic === topic && {
-                          backgroundColor: activeBg,
-                          borderColor: activeBg,
-                        },
-                      ]}
-                      onPress={() =>
-                        setSelectedTopic(selectedTopic === topic ? null : topic)
-                      }
-                    >
-                      <Text
-                        style={[
-                          styles.chipText,
-                          { color: isDark ? "#ccd6e0" : "#444" },
-                          selectedTopic === topic && styles.chipTextActive,
-                        ]}
-                      >
-                        {topic}
-                      </Text>
-                    </TouchableOpacity>
+                  {topicGroups.map((group) => (
+                    <View key={group.key} style={styles.topicFilterGroup}>
+                      {group.title ? (
+                        <Text
+                          style={[
+                            styles.topicFilterGroupTitle,
+                            { color: sectionLabelColor },
+                          ]}
+                          numberOfLines={1}
+                        >
+                          {group.title}
+                        </Text>
+                      ) : null}
+                      <View style={styles.chipsWrap}>
+                        {group.topics.map((topic) => (
+                          <TouchableOpacity
+                            key={topic.value}
+                            style={[
+                              styles.chip,
+                              {
+                                backgroundColor: chipBg,
+                                borderColor: chipBorder,
+                              },
+                              selectedTopic === topic.value && {
+                                backgroundColor: activeBg,
+                                borderColor: activeBg,
+                              },
+                            ]}
+                            onPress={() =>
+                              setSelectedTopic(
+                                selectedTopic === topic.value
+                                  ? null
+                                  : topic.value,
+                              )
+                            }
+                          >
+                            <Text
+                              style={[
+                                styles.chipText,
+                                { color: isDark ? "#ccd6e0" : "#444" },
+                                selectedTopic === topic.value &&
+                                  styles.chipTextActive,
+                              ]}
+                            >
+                              {topic.label}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    </View>
                   ))}
                 </View>
               </View>
@@ -437,12 +532,23 @@ const styles = StyleSheet.create({
   sectionLabel: {
     fontSize: 11,
     fontWeight: "700",
-    letterSpacing: 1.2,
+    letterSpacing: 0,
   },
   chipsWrap: {
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 8,
+  },
+  topicFilterGroup: {
+    width: "100%",
+    gap: 8,
+    marginTop: 2,
+  },
+  topicFilterGroupTitle: {
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: "800",
+    letterSpacing: 0,
   },
   chip: {
     paddingHorizontal: 14,

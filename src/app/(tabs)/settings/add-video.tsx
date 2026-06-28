@@ -31,8 +31,13 @@ import { supabase } from "../../../../utils/supabase";
 import {
   getVideoTopicNames,
   getVideoTopics,
+  getTopicDisplayName,
   normalizeVideoRows,
-  parseTopics,
+  normalizeTopicRows,
+  parseTopicInput,
+  parseTopicInputs,
+  TOPIC_WITH_PARENT_SELECT,
+  type TopicInput,
   VIDEO_WITH_TOPICS_SELECT,
 } from "../../../../utils/videoTopics";
 import { getYoutubeVideoId, parseYoutubeTime } from "../../../../utils/youtube";
@@ -66,7 +71,6 @@ type ManagedVideo = {
   youtube_url: string;
   created_at: string;
   language_code: string | null;
-  video_topic: string | null;
   topics?: TopicType[];
   author_name: string | null;
   start_time: number | null;
@@ -82,8 +86,20 @@ type AuthorRow = {
 
 type TopicRow = {
   id: number;
+  categoryId: number | null;
+  subcategoryId: number | null;
+  name: string;
+  parentName: string | null;
   topic: string;
   count: number;
+};
+
+type TopicAssignmentRow = {
+  categoryId: number;
+  subcategoryId: number | null;
+  name: string;
+  parentName: string | null;
+  label: string;
 };
 
 type Feedback = {
@@ -102,7 +118,7 @@ type VideoInsertPayload = {
 
 type PreparedVideoPayload = {
   payload: VideoInsertPayload;
-  topicNames: string[];
+  topicInputs: TopicInput[];
 };
 
 type FieldDefinition<Key extends string> = {
@@ -119,7 +135,7 @@ type PreparedVideo = {
   title: string;
   authorName: string | null;
   languageCode: string | null;
-  topicNames: string[];
+  topicInputs: TopicInput[];
   payload: VideoInsertPayload;
 };
 
@@ -173,7 +189,7 @@ const sharedFieldDefinitions: FieldDefinition<SharedFieldKey>[] = [
   {
     key: "videoTopic",
     label: "Thema",
-    placeholder: "Thema oder mehrere Themen",
+    placeholder: "Oberkategorie > Unterkategorie, weiteres Thema",
   },
   {
     key: "startTime",
@@ -321,7 +337,7 @@ function buildVideoPayloadFromDraft(
   const youtubeUrl = draft.youtubeUrl.trim();
   const authorName = optionalText(draft.authorName);
   const languageCode = optionalText(draft.languageCode)?.toLowerCase() ?? null;
-  const topicNames = normalizeTopicList(parseTopics(draft.videoTopic));
+  const topicInputs = parseTopicInputs(draft.videoTopic);
 
   if (!title || !youtubeUrl) {
     throw new Error(`${rowLabel}: Titel und YouTube URL sind Pflicht.`);
@@ -349,7 +365,7 @@ function buildVideoPayloadFromDraft(
       start_time: startTime,
       end_time: endTime,
     },
-    topicNames,
+    topicInputs,
   };
 }
 
@@ -392,51 +408,355 @@ async function ensureAuthorsExist(authorNames: (string | null)[]) {
   if (error) throw error;
 }
 
-async function replaceVideoTopics(videoId: number, topicNames: string[]) {
-  const normalizedTopicNames = normalizeTopicList(topicNames);
+function normalizeTopicInputs(topicInputs: TopicInput[]) {
+  const seen = new Set<string>();
+  const normalizedInputs: TopicInput[] = [];
+
+  for (const input of topicInputs) {
+    const name = input.name.trim();
+    const parentName = input.parentName?.trim() || null;
+    const label = parentName ? `${parentName} > ${name}` : name;
+    const key = label.toLocaleLowerCase("de");
+
+    if (!name || seen.has(key)) continue;
+    if (parentName?.toLocaleLowerCase("de") === name.toLocaleLowerCase("de")) {
+      throw new Error(`"${name}" kann nicht seine eigene Oberkategorie sein.`);
+    }
+
+    seen.add(key);
+    normalizedInputs.push({ name, parentName, label });
+  }
+
+  const parentNamesWithChildren = new Set(
+    normalizedInputs
+      .map((input) => input.parentName)
+      .filter((parentName): parentName is string => Boolean(parentName))
+      .map((parentName) => parentName.toLocaleLowerCase("de")),
+  );
+
+  return normalizedInputs.filter((input) => {
+    if (input.parentName) return true;
+    return !parentNamesWithChildren.has(input.name.toLocaleLowerCase("de"));
+  });
+}
+
+async function ensureTopicsExist(topicInputs: TopicInput[]) {
+  const normalizedInputs = normalizeTopicInputs(topicInputs);
+  if (normalizedInputs.length === 0) return [];
+
+  const categoryNames = [
+    ...new Set(normalizedInputs.map((input) => input.parentName ?? input.name)),
+  ];
+
+  const { error: categoryUpsertError } = await supabase
+    .from("topic_categories")
+    .upsert(
+      categoryNames.map((name) => ({ name })),
+      { onConflict: "name" },
+    );
+
+  if (categoryUpsertError) throw categoryUpsertError;
+
+  const { data: categoryRows, error: categoryRowsError } = await supabase
+    .from("topic_categories")
+    .select("id, name")
+    .in("name", categoryNames);
+
+  if (categoryRowsError) throw categoryRowsError;
+
+  const categoriesByName = new Map<string, { id: number; name: string }>();
+  for (const row of categoryRows ?? []) {
+    if (typeof row.id === "number" && typeof row.name === "string") {
+      categoriesByName.set(row.name, { id: row.id, name: row.name });
+    }
+  }
+
+  if (categoriesByName.size !== categoryNames.length) {
+    throw new Error("Nicht alle Oberkategorien konnten angelegt werden.");
+  }
+
+  const subcategoryPayloads = normalizedInputs
+    .filter((input) => input.parentName)
+    .map((input) => {
+      const category = categoriesByName.get(input.parentName as string);
+      if (!category) {
+        throw new Error(`"${input.parentName}" wurde nicht gefunden.`);
+      }
+
+      return {
+        category_id: category.id,
+        name: input.name,
+      };
+    });
+
+  if (subcategoryPayloads.length > 0) {
+    const { error: subcategoryUpsertError } = await supabase
+      .from("topic_subcategories")
+      .upsert(subcategoryPayloads, { onConflict: "category_id,name" });
+
+    if (subcategoryUpsertError) throw subcategoryUpsertError;
+  }
+
+  const subcategoriesByKey = new Map<
+    string,
+    { id: number; category_id: number; name: string }
+  >();
+
+  if (subcategoryPayloads.length > 0) {
+    const categoryIds = [
+      ...new Set(subcategoryPayloads.map((payload) => payload.category_id)),
+    ];
+    const { data: subcategoryRows, error: subcategoryRowsError } = await supabase
+      .from("topic_subcategories")
+      .select("id, category_id, name")
+      .in("category_id", categoryIds);
+
+    if (subcategoryRowsError) throw subcategoryRowsError;
+
+    const requestedKeys = new Set(
+      subcategoryPayloads.map(
+        (payload) =>
+          `${payload.category_id}::${payload.name.toLocaleLowerCase("de")}`,
+      ),
+    );
+
+    for (const row of subcategoryRows ?? []) {
+      if (
+        typeof row.id !== "number" ||
+        typeof row.category_id !== "number" ||
+        typeof row.name !== "string"
+      ) {
+        continue;
+      }
+
+      const key = `${row.category_id}::${row.name.toLocaleLowerCase("de")}`;
+      if (requestedKeys.has(key)) {
+        subcategoriesByKey.set(key, {
+          id: row.id,
+          category_id: row.category_id,
+          name: row.name,
+        });
+      }
+    }
+  }
+
+  return normalizedInputs.map((input): TopicAssignmentRow => {
+    const categoryName = input.parentName ?? input.name;
+    const category = categoriesByName.get(categoryName);
+
+    if (!category) {
+      throw new Error(`"${categoryName}" wurde nicht gefunden.`);
+    }
+
+    if (!input.parentName) {
+      return {
+        categoryId: category.id,
+        subcategoryId: null,
+        name: input.name,
+        parentName: null,
+        label: input.label,
+      };
+    }
+
+    const subcategoryKey = `${category.id}::${input.name.toLocaleLowerCase(
+      "de",
+    )}`;
+    const subcategory = subcategoriesByKey.get(subcategoryKey);
+
+    if (!subcategory) {
+      throw new Error(`"${input.label}" konnte nicht angelegt werden.`);
+    }
+
+    return {
+      categoryId: category.id,
+      subcategoryId: subcategory.id,
+      name: input.name,
+      parentName: input.parentName,
+      label: input.label,
+    };
+  });
+}
+
+async function replaceVideoTopics(videoId: number, topicInputs: TopicInput[]) {
+  const topicRows = await ensureTopicsExist(topicInputs);
 
   const { error: deleteError } = await supabase
-    .from("video_topics")
+    .from("video_category_assignments")
     .delete()
     .eq("video_id", videoId);
 
   if (deleteError) throw deleteError;
 
-  if (normalizedTopicNames.length === 0) return;
+  if (topicRows.length === 0) return;
 
-  const topicPayloads = normalizedTopicNames.map((name) => ({ name }));
-  const { error: upsertError } = await supabase
-    .from("topics")
-    .upsert(topicPayloads, { onConflict: "name" });
-
-  if (upsertError) throw upsertError;
-
-  const { data: topicRows, error: topicsError } = await supabase
-    .from("topics")
-    .select("id, name")
-    .in("name", normalizedTopicNames);
-
-  if (topicsError) throw topicsError;
-
-  const rows = (topicRows ?? [])
-    .filter(
-      (topic): topic is { id: number; name: string } =>
-        typeof topic.id === "number" && typeof topic.name === "string",
-    )
-    .map((topic) => ({
-      video_id: videoId,
-      topic_id: topic.id,
-    }));
-
-  if (rows.length !== normalizedTopicNames.length) {
-    throw new Error("Nicht alle Themen konnten angelegt werden.");
-  }
+  const rows = topicRows.map((topic) => ({
+    video_id: videoId,
+    category_id: topic.categoryId,
+    subcategory_id: topic.subcategoryId,
+  }));
 
   const { error: insertError } = await supabase
-    .from("video_topics")
+    .from("video_category_assignments")
     .insert(rows);
 
   if (insertError) throw insertError;
+}
+
+function assertTopicRowIds(topicRow: TopicRow) {
+  if (!topicRow.categoryId) {
+    throw new Error(`"${topicRow.topic}" wurde nicht gefunden.`);
+  }
+}
+
+async function getAssignedVideoIdsForTopic(topicRow: TopicRow) {
+  assertTopicRowIds(topicRow);
+
+  let request = supabase
+    .from("video_category_assignments")
+    .select("video_id");
+
+  request = topicRow.subcategoryId
+    ? request.eq("subcategory_id", topicRow.subcategoryId)
+    : request.eq("category_id", topicRow.categoryId as number).is("subcategory_id", null);
+
+  const { data, error } = await request;
+  if (error) throw error;
+
+  return [
+    ...new Set(
+      (data ?? [])
+        .map((row) => row.video_id)
+        .filter((videoId): videoId is number => typeof videoId === "number"),
+    ),
+  ];
+}
+
+async function getAssignedVideoIdsForTarget(
+  categoryId: number,
+  subcategoryId: number | null,
+) {
+  let request = supabase
+    .from("video_category_assignments")
+    .select("video_id")
+    .eq("category_id", categoryId);
+
+  request = subcategoryId
+    ? request.eq("subcategory_id", subcategoryId)
+    : request.is("subcategory_id", null);
+
+  const { data, error } = await request;
+  if (error) throw error;
+
+  return new Set(
+    (data ?? [])
+      .map((row) => row.video_id)
+      .filter((videoId): videoId is number => typeof videoId === "number"),
+  );
+}
+
+async function deleteAssignmentsForTopic(topicRow: TopicRow) {
+  assertTopicRowIds(topicRow);
+
+  let request = supabase.from("video_category_assignments").delete();
+  request = topicRow.subcategoryId
+    ? request.eq("subcategory_id", topicRow.subcategoryId)
+    : request.eq("category_id", topicRow.categoryId as number).is("subcategory_id", null);
+
+  const { error } = await request;
+  if (error) throw error;
+}
+
+async function moveAssignmentsToTarget(
+  topicRow: TopicRow,
+  target: TopicAssignmentRow,
+) {
+  assertTopicRowIds(topicRow);
+
+  if (
+    topicRow.categoryId === target.categoryId &&
+    topicRow.subcategoryId === target.subcategoryId
+  ) {
+    return;
+  }
+
+  const currentVideoIds = await getAssignedVideoIdsForTopic(topicRow);
+  const existingTargetVideoIds = await getAssignedVideoIdsForTarget(
+    target.categoryId,
+    target.subcategoryId,
+  );
+  const rowsToInsert = currentVideoIds
+    .filter((videoId) => !existingTargetVideoIds.has(videoId))
+    .map((videoId) => ({
+      video_id: videoId,
+      category_id: target.categoryId,
+      subcategory_id: target.subcategoryId,
+    }));
+
+  if (rowsToInsert.length > 0) {
+    const { error: insertError } = await supabase
+      .from("video_category_assignments")
+      .insert(rowsToInsert);
+
+    if (insertError) throw insertError;
+  }
+
+  await deleteAssignmentsForTopic(topicRow);
+}
+
+async function deleteSubcategoryIfUnused(subcategoryId: number) {
+  const { data: assignmentRows, error: assignmentError } = await supabase
+    .from("video_category_assignments")
+    .select("id")
+    .eq("subcategory_id", subcategoryId)
+    .limit(1);
+
+  if (assignmentError) throw assignmentError;
+  if ((assignmentRows ?? []).length > 0) return;
+
+  const { error: deleteError } = await supabase
+    .from("topic_subcategories")
+    .delete()
+    .eq("id", subcategoryId);
+
+  if (deleteError) throw deleteError;
+}
+
+async function deleteCategoryIfUnused(categoryId: number) {
+  const [assignmentResult, subcategoryResult] = await Promise.all([
+    supabase
+      .from("video_category_assignments")
+      .select("id")
+      .eq("category_id", categoryId)
+      .limit(1),
+    supabase
+      .from("topic_subcategories")
+      .select("id")
+      .eq("category_id", categoryId)
+      .limit(1),
+  ]);
+
+  if (assignmentResult.error) throw assignmentResult.error;
+  if (subcategoryResult.error) throw subcategoryResult.error;
+  if ((assignmentResult.data ?? []).length > 0) return;
+  if ((subcategoryResult.data ?? []).length > 0) return;
+
+  const { error: deleteError } = await supabase
+    .from("topic_categories")
+    .delete()
+    .eq("id", categoryId);
+
+  if (deleteError) throw deleteError;
+}
+
+async function getSubcategoryCount(categoryId: number) {
+  const { data, error } = await supabase
+    .from("topic_subcategories")
+    .select("id")
+    .eq("category_id", categoryId)
+    .limit(1);
+
+  if (error) throw error;
+  return (data ?? []).length;
 }
 
 function confirmDestructiveAction(title: string, message: string) {
@@ -531,6 +851,7 @@ export default function AddVideo() {
   const [passwordFeedback, setPasswordFeedback] = useState<string | null>(null);
   const [isPasswordChecking, setIsPasswordChecking] = useState(false);
   const [managedVideos, setManagedVideos] = useState<ManagedVideo[]>([]);
+  const [topicCatalog, setTopicCatalog] = useState<TopicType[]>([]);
   const [authors, setAuthors] = useState<AuthorRow[]>([]);
   const [managementLoaded, setManagementLoaded] = useState(false);
   const [isManagementLoading, setIsManagementLoading] = useState(false);
@@ -547,6 +868,9 @@ export default function AddVideo() {
   );
   const [selectedTopic, setSelectedTopic] = useState<string | null>(null);
   const [topicDraftName, setTopicDraftName] = useState("");
+  const [topicParentDraftName, setTopicParentDraftName] = useState("");
+  const [newTopicName, setNewTopicName] = useState("");
+  const [newTopicParentName, setNewTopicParentName] = useState("");
 
   const colors = Colors[colorScheme];
   const borderColor =
@@ -573,7 +897,7 @@ export default function AddVideo() {
     setManagementFeedback(null);
 
     try {
-      const [authorsResult, videosResult] = await Promise.all([
+      const [authorsResult, videosResult, topicsResult] = await Promise.all([
         supabase
           .from("authors")
           .select("id, created_at, author_name")
@@ -583,13 +907,19 @@ export default function AddVideo() {
           .select(VIDEO_WITH_TOPICS_SELECT)
           .order("created_at", { ascending: false })
           .order("id", { ascending: false }),
+        supabase
+          .from("topic_categories")
+          .select(TOPIC_WITH_PARENT_SELECT)
+          .order("name", { ascending: true }),
       ]);
 
       if (videosResult.error) throw videosResult.error;
+      if (topicsResult.error) throw topicsResult.error;
 
       const nextManagedVideos = normalizeVideoRows(
         videosResult.data,
       ) as ManagedVideo[];
+      const nextTopicCatalog = normalizeTopicRows(topicsResult.data);
       const nextAuthors = mergeAuthorsFromSources(
         authorsResult.error
           ? []
@@ -602,6 +932,7 @@ export default function AddVideo() {
       );
 
       setAuthors(nextAuthors);
+      setTopicCatalog(nextTopicCatalog);
       setManagedVideos(nextManagedVideos);
       setManagementLoaded(true);
 
@@ -665,23 +996,42 @@ export default function AddVideo() {
   }, [authors]);
 
   const topicRows = useMemo<TopicRow[]>(() => {
-    const counts = new Map<string, TopicRow>();
+    const rows = new Map<string, TopicRow>();
+
+    for (const topic of topicCatalog) {
+      const displayName = getTopicDisplayName(topic);
+      rows.set(topic.key, {
+        id: topic.id,
+        categoryId: topic.category_id,
+        subcategoryId: topic.subcategory_id,
+        name: topic.name,
+        parentName: topic.category?.name ?? null,
+        topic: displayName,
+        count: 0,
+      });
+    }
 
     for (const video of managedVideos) {
       for (const topic of getVideoTopics(video)) {
-        const existing = counts.get(topic.name);
-        counts.set(topic.name, {
+        const displayName = getTopicDisplayName(topic);
+        const key = topic.key || `topic:${displayName}`;
+        const existing = rows.get(key);
+        rows.set(key, {
           id: existing?.id && existing.id > 0 ? existing.id : topic.id,
-          topic: topic.name,
+          categoryId: existing?.categoryId ?? topic.category_id,
+          subcategoryId: existing?.subcategoryId ?? topic.subcategory_id,
+          name: existing?.name ?? topic.name,
+          parentName: existing?.parentName ?? topic.category?.name ?? null,
+          topic: existing?.topic ?? displayName,
           count: (existing?.count ?? 0) + 1,
         });
       }
     }
 
-    return [...counts.values()].sort((a, b) =>
+    return [...rows.values()].sort((a, b) =>
       a.topic.localeCompare(b.topic, "de"),
     );
-  }, [managedVideos]);
+  }, [managedVideos, topicCatalog]);
 
   useEffect(() => {
     if (
@@ -692,6 +1042,7 @@ export default function AddVideo() {
     ) {
       setSelectedTopic(null);
       setTopicDraftName("");
+      setTopicParentDraftName("");
     }
   }, [managementLoaded, selectedTopic, topicRows]);
 
@@ -825,7 +1176,7 @@ export default function AddVideo() {
         title: payload.title,
         authorName: payload.author_name,
         languageCode: payload.language_code,
-        topicNames: preparedPayload.topicNames,
+        topicInputs: preparedPayload.topicInputs,
         payload,
       };
     });
@@ -898,7 +1249,7 @@ export default function AddVideo() {
 
       await Promise.all(
         insertedRows.map((video, index) =>
-          replaceVideoTopics(video.id, preparedVideos[index].topicNames),
+          replaceVideoTopics(video.id, preparedVideos[index].topicInputs),
         ),
       );
 
@@ -1226,6 +1577,7 @@ export default function AddVideo() {
 
       setSelectedTopic(null);
       setTopicDraftName("");
+      setTopicParentDraftName("");
       setManagementSearch(String(video.id));
       startEditVideo(video);
       handledShortcutRef.current = shortcutKey;
@@ -1233,10 +1585,12 @@ export default function AddVideo() {
     }
 
     if (requestedTopic) {
+      const topicRow = topicRows.find((row) => row.topic === requestedTopic);
       setEditingVideoId(null);
       setVideoDraft(createBlankVideoDraft());
       setSelectedTopic(requestedTopic);
-      setTopicDraftName(requestedTopic);
+      setTopicDraftName(topicRow?.name ?? requestedTopic);
+      setTopicParentDraftName(topicRow?.parentName ?? "");
       setManagementSearch("");
       handledShortcutRef.current = shortcutKey;
     }
@@ -1247,6 +1601,7 @@ export default function AddVideo() {
     requestedEditVideoId,
     requestedTopic,
     shortcutKey,
+    topicRows,
   ]);
 
   const handleSaveVideo = async (videoId: number) => {
@@ -1277,7 +1632,7 @@ export default function AddVideo() {
 
       if (error) throw error;
 
-      await replaceVideoTopics(videoId, preparedPayload.topicNames);
+      await replaceVideoTopics(videoId, preparedPayload.topicInputs);
 
       await invalidateVideoCaches();
       await loadManagementData();
@@ -1355,21 +1710,90 @@ export default function AddVideo() {
   };
 
   const handleSelectTopic = (topic: string) => {
+    const topicRow = topicRows.find((row) => row.topic === topic);
+
     setSelectedTopic(topic);
-    setTopicDraftName(topic);
+    setTopicDraftName(topicRow?.name ?? topic);
+    setTopicParentDraftName(topicRow?.parentName ?? "");
     setManagementFeedback(null);
   };
 
-  const handleRenameTopic = async () => {
+  const handleAddTopic = async () => {
+    if (operationDisabled) return;
+
+    const rawName = newTopicName.trim();
+    if (!rawName) {
+      setManagementFeedback({
+        type: "error",
+        message: "Bitte einen Kategorienamen eintragen.",
+      });
+      return;
+    }
+
+    const parsedTopic = parseTopicInput(rawName);
+    if (!parsedTopic) return;
+
+    const explicitParentName = optionalText(newTopicParentName);
+    const topicInput: TopicInput = {
+      name: parsedTopic.name,
+      parentName: explicitParentName ?? parsedTopic.parentName,
+      label: explicitParentName
+        ? `${explicitParentName} > ${parsedTopic.name}`
+        : parsedTopic.label,
+    };
+
+    setIsManagementSaving(true);
+    setManagementFeedback(null);
+
+    try {
+      await ensureTopicsExist([topicInput]);
+      await invalidateVideoCaches();
+      await loadManagementData();
+
+      setNewTopicName("");
+      setNewTopicParentName("");
+      setSelectedTopic(topicInput.label);
+      setTopicDraftName(topicInput.name);
+      setTopicParentDraftName(topicInput.parentName ?? "");
+      setManagementFeedback({
+        type: "success",
+        message: `"${topicInput.label}" wurde hinzugefügt.`,
+      });
+      Toast.show({
+        type: "success",
+        text1: "Kategorie hinzugefügt",
+        text2: topicInput.label,
+      });
+    } catch (error) {
+      const message = getErrorMessage(error);
+      setManagementFeedback({ type: "error", message });
+      Toast.show({
+        type: "error",
+        text1: "Kategorie konnte nicht hinzugefügt werden",
+        text2: message,
+      });
+    } finally {
+      setIsManagementSaving(false);
+    }
+  };
+
+  const handleSaveTopic = async () => {
     if (operationDisabled) return;
 
     const currentTopic = selectedTopic;
-    const nextTopic = topicDraftName.trim();
+    const currentTopicRow = topicRows.find(
+      (topicRow) => topicRow.topic === currentTopic,
+    );
+    const parsedNextTopic = parseTopicInput(topicDraftName.trim());
+    const nextTopic = parsedNextTopic?.name ?? "";
+    const nextParentTopic = optionalText(topicParentDraftName)
+      ?? parsedNextTopic?.parentName
+      ?? null;
 
-    if (!currentTopic) {
+    if (!currentTopic || !currentTopicRow) {
       setManagementFeedback({
         type: "error",
-        message: "Bitte zuerst ein Thema auswählen.",
+        message: "Bitte zuerst eine Kategorie auswählen.",
       });
       return;
     }
@@ -1377,57 +1801,90 @@ export default function AddVideo() {
     if (!nextTopic) {
       setManagementFeedback({
         type: "error",
-        message: "Der neue Themenname darf nicht leer sein.",
+        message: "Der Kategoriename darf nicht leer sein.",
       });
       return;
     }
 
-    if (nextTopic === currentTopic) {
+    if (
+      nextParentTopic?.toLocaleLowerCase("de") ===
+      nextTopic.toLocaleLowerCase("de")
+    ) {
       setManagementFeedback({
         type: "error",
-        message: "Der Themenname ist unverändert.",
+        message: "Eine Kategorie kann nicht ihre eigene Oberkategorie sein.",
       });
       return;
     }
 
-    const currentTopicRow = topicRows.find(
-      (topicRow) => topicRow.topic === currentTopic,
-    );
     const affectedCount = currentTopicRow?.count ?? 0;
+    const nextTopicLabel = nextParentTopic
+      ? `${nextParentTopic} > ${nextTopic}`
+      : nextTopic;
 
     setIsManagementSaving(true);
     setManagementFeedback(null);
 
     try {
-      const topicRequest =
-        currentTopicRow && currentTopicRow.id > 0
-          ? supabase
-              .from("topics")
-              .update({ name: nextTopic })
-              .eq("id", currentTopicRow.id)
-          : supabase
-              .from("topics")
-              .update({ name: nextTopic })
-              .eq("name", currentTopic);
+      assertTopicRowIds(currentTopicRow);
 
-      const { error } = await topicRequest;
-      if (error) throw error;
+      if (!currentTopicRow.subcategoryId && !nextParentTopic) {
+        const { error } = await supabase
+          .from("topic_categories")
+          .update({ name: nextTopic })
+          .eq("id", currentTopicRow.categoryId as number);
+
+        if (error) throw error;
+      } else {
+        if (!currentTopicRow.subcategoryId && nextParentTopic) {
+          const childCount = await getSubcategoryCount(
+            currentTopicRow.categoryId as number,
+          );
+
+          if (childCount > 0) {
+            throw new Error(
+              "Diese Oberkategorie hat Unterkategorien. Benenne sie um oder lege eine neue Unterkategorie an.",
+            );
+          }
+        }
+
+        const [targetTopic] = await ensureTopicsExist([
+          {
+            name: nextTopic,
+            parentName: nextParentTopic,
+            label: nextTopicLabel,
+          },
+        ]);
+
+        if (!targetTopic) {
+          throw new Error(`"${nextTopicLabel}" konnte nicht angelegt werden.`);
+        }
+
+        await moveAssignmentsToTarget(currentTopicRow, targetTopic);
+
+        if (currentTopicRow.subcategoryId) {
+          await deleteSubcategoryIfUnused(currentTopicRow.subcategoryId);
+        } else {
+          await deleteCategoryIfUnused(currentTopicRow.categoryId as number);
+        }
+      }
 
       await invalidateVideoCaches();
       await loadManagementData();
 
-      setSelectedTopic(nextTopic);
+      setSelectedTopic(nextTopicLabel);
       setTopicDraftName(nextTopic);
+      setTopicParentDraftName(nextParentTopic ?? "");
       setManagementFeedback({
         type: "success",
         message: `"${currentTopic}" wurde in ${affectedCount} Video${
           affectedCount === 1 ? "" : "s"
-        } umbenannt.`,
+        } gespeichert.`,
       });
       Toast.show({
         type: "success",
-        text1: "Thema umbenannt",
-        text2: nextTopic,
+        text1: "Kategorie gespeichert",
+        text2: nextTopicLabel,
       });
     } catch (error) {
       const message = isUniqueConstraintError(error)
@@ -1436,7 +1893,7 @@ export default function AddVideo() {
       setManagementFeedback({ type: "error", message });
       Toast.show({
         type: "error",
-        text1: "Thema konnte nicht geändert werden",
+        text1: "Kategorie konnte nicht geändert werden",
         text2: message,
       });
     } finally {
@@ -1451,7 +1908,7 @@ export default function AddVideo() {
     if (!currentTopic) {
       setManagementFeedback({
         type: "error",
-        message: "Bitte zuerst ein Thema auswählen.",
+        message: "Bitte zuerst eine Kategorie auswählen.",
       });
       return;
     }
@@ -1462,7 +1919,7 @@ export default function AddVideo() {
     const affectedCount = currentTopicRow?.count ?? 0;
 
     const confirmed = await confirmDestructiveAction(
-      "Thema entfernen?",
+      "Kategorie aus Videos entfernen?",
       `"${currentTopic}" wird aus ${affectedCount} Video${
         affectedCount === 1 ? "" : "s"
       } entfernt. Die Videos bleiben erhalten.`,
@@ -1474,44 +1931,25 @@ export default function AddVideo() {
     setManagementFeedback(null);
 
     try {
-      let topicId = currentTopicRow && currentTopicRow.id > 0
-        ? currentTopicRow.id
-        : null;
-
-      if (!topicId) {
-        const { data: topicData, error: topicError } = await supabase
-          .from("topics")
-          .select("id")
-          .eq("name", currentTopic)
-          .single();
-
-        if (topicError) throw topicError;
-        topicId = (topicData as { id: number } | null)?.id ?? null;
-      }
-
-      if (!topicId) {
+      if (!currentTopicRow) {
         throw new Error(`"${currentTopic}" wurde nicht gefunden.`);
       }
 
-      const { error } = await supabase
-        .from("video_topics")
-        .delete()
-        .eq("topic_id", topicId);
-
-      if (error) throw error;
+      await deleteAssignmentsForTopic(currentTopicRow);
 
       await invalidateVideoCaches();
       await loadManagementData();
 
       setSelectedTopic(null);
       setTopicDraftName("");
+      setTopicParentDraftName("");
       setManagementFeedback({
         type: "success",
         message: `"${currentTopic}" wurde aus den Videos entfernt.`,
       });
       Toast.show({
         type: "success",
-        text1: "Thema entfernt",
+        text1: "Kategorie entfernt",
         text2: currentTopic,
       });
     } catch (error) {
@@ -1519,7 +1957,7 @@ export default function AddVideo() {
       setManagementFeedback({ type: "error", message });
       Toast.show({
         type: "error",
-        text1: "Thema konnte nicht entfernt werden",
+        text1: "Kategorie konnte nicht entfernt werden",
         text2: message,
       });
     } finally {
@@ -2156,6 +2594,45 @@ export default function AddVideo() {
                         </ThemedText>
                       </View>
 
+                      <View style={styles.inlineForm}>
+                        <TextInput
+                          value={newTopicParentName}
+                          onChangeText={setNewTopicParentName}
+                          placeholder="Oberkategorie optional"
+                          placeholderTextColor={Colors.universal.grayedOut}
+                          editable={!operationDisabled}
+                          style={[
+                            styles.input,
+                            styles.inlineInput,
+                            {
+                              backgroundColor: inputBackground,
+                              borderColor,
+                              color: colors.text,
+                            },
+                          ]}
+                        />
+                        <TextInput
+                          value={newTopicName}
+                          onChangeText={setNewTopicName}
+                          placeholder="Kategorie oder Ober > Unter"
+                          placeholderTextColor={Colors.universal.grayedOut}
+                          editable={!operationDisabled}
+                          style={[
+                            styles.input,
+                            styles.inlineInput,
+                            {
+                              backgroundColor: inputBackground,
+                              borderColor,
+                              color: colors.text,
+                            },
+                          ]}
+                        />
+                        {renderSmallButton("Hinzufügen", () => void handleAddTopic(), {
+                          filled: true,
+                          disabled: operationDisabled,
+                        })}
+                      </View>
+
                       <View style={styles.topicGrid}>
                         {topicRows.map((topicRow) => {
                           const active = selectedTopic === topicRow.topic;
@@ -2196,9 +2673,9 @@ export default function AddVideo() {
 
                       <View style={styles.inlineForm}>
                         <TextInput
-                          value={topicDraftName}
-                          onChangeText={setTopicDraftName}
-                          placeholder="Thema auswählen oder neuen Namen schreiben"
+                          value={topicParentDraftName}
+                          onChangeText={setTopicParentDraftName}
+                          placeholder="Oberkategorie optional"
                           placeholderTextColor={Colors.universal.grayedOut}
                           editable={!operationDisabled && Boolean(selectedTopic)}
                           style={[
@@ -2211,7 +2688,23 @@ export default function AddVideo() {
                             },
                           ]}
                         />
-                        {renderSmallButton("Umbenennen", () => void handleRenameTopic(), {
+                        <TextInput
+                          value={topicDraftName}
+                          onChangeText={setTopicDraftName}
+                          placeholder="Kategorie auswählen oder Namen schreiben"
+                          placeholderTextColor={Colors.universal.grayedOut}
+                          editable={!operationDisabled && Boolean(selectedTopic)}
+                          style={[
+                            styles.input,
+                            styles.inlineInput,
+                            {
+                              backgroundColor: inputBackground,
+                              borderColor,
+                              color: colors.text,
+                            },
+                          ]}
+                        />
+                        {renderSmallButton("Speichern", () => void handleSaveTopic(), {
                           filled: true,
                           disabled: operationDisabled || !selectedTopic,
                         })}
@@ -2266,6 +2759,7 @@ export default function AddVideo() {
                           {renderSmallButton("Alle anzeigen", () => {
                             setSelectedTopic(null);
                             setTopicDraftName("");
+                            setTopicParentDraftName("");
                           })}
                         </View>
                       ) : null}

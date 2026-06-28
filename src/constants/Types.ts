@@ -36,10 +36,32 @@ export type UseGradientOptionsType = {
 };
 
 // Videos
-export type TopicType = {
+export type TopicCategoryType = {
   id: number;
   name: string;
-  parent_topic_id: number | null;
+};
+
+export type TopicSubcategoryType = {
+  id: number;
+  category_id: number;
+  name: string;
+};
+
+export type VideoCategoryAssignmentType = {
+  id: number;
+  category_id: number;
+  subcategory_id: number | null;
+  topic_categories?: TopicCategoryType | null;
+  topic_subcategories?: TopicSubcategoryType | null;
+};
+
+export type TopicType = {
+  key: string;
+  id: number;
+  name: string;
+  category_id: number;
+  subcategory_id: number | null;
+  category?: TopicCategoryType | null;
 };
 
 export type VideoType = {
@@ -49,8 +71,8 @@ export type VideoType = {
   start_time: number | null;
   end_time: number | null;
   language_code: string | null;
-  video_topic: string | null;
   topics?: TopicType[];
+  video_category_assignments?: VideoCategoryAssignmentType[];
   author_name: string | null;
   created_at: string;
 };

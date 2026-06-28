@@ -3,7 +3,10 @@ import { Colors } from "@/constants/Colors";
 import type { VideoType } from "@/constants/Types";
 import { useColorScheme } from "@/hooks/useColorScheme";
 import { useLanguage } from "../../contexts/LanguageContext";
-import { getVideoTopicNames } from "../../utils/videoTopics";
+import {
+  getTopicDisplayName,
+  getVideoTopics,
+} from "../../utils/videoTopics";
 import { router } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
@@ -36,8 +39,18 @@ const WEB_GRID_CARD_CONTENT_HEIGHT = 144;
 type TopicVideoSection = {
   key: string;
   title: string;
+  fullTitle: string;
   videos: VideoType[];
   isUncategorized: boolean;
+  isDirectRoot: boolean;
+};
+
+type TopicVideoGroup = {
+  key: string;
+  title: string;
+  sections: TopicVideoSection[];
+  isUncategorized: boolean;
+  videoCount: number;
 };
 
 type VideoGridListProps = {
@@ -114,38 +127,119 @@ export default function VideoGridList({
 
   const uncategorizedTitle = t("uncategorizedTopic");
 
-  const topicSections = useMemo<TopicVideoSection[]>(() => {
-    const sectionsByKey = new Map<string, TopicVideoSection>();
+  const topicGroups = useMemo<TopicVideoGroup[]>(() => {
+    const groupsByKey = new Map<
+      string,
+      Omit<TopicVideoGroup, "videoCount"> & { videoIds: Set<number> }
+    >();
+
+    const getOrCreateGroup = (
+      key: string,
+      title: string,
+      isUncategorized: boolean,
+    ) => {
+      const existing = groupsByKey.get(key);
+      if (existing) return existing;
+
+      const group = {
+        key,
+        title,
+        sections: [],
+        isUncategorized,
+        videoIds: new Set<number>(),
+      };
+      groupsByKey.set(key, group);
+      return group;
+    };
+
+    const addVideoToSection = (
+      group: Omit<TopicVideoGroup, "videoCount"> & { videoIds: Set<number> },
+      section: Omit<TopicVideoSection, "videos">,
+      video: VideoType,
+    ) => {
+      group.videoIds.add(video.id);
+
+      const existing = group.sections.find(
+        (currentSection) => currentSection.key === section.key,
+      );
+
+      if (existing) {
+        if (!existing.videos.some((existingVideo) => existingVideo.id === video.id)) {
+          existing.videos.push(video);
+        }
+        return;
+      }
+
+      group.sections.push({ ...section, videos: [video] });
+    };
 
     for (const video of videos) {
-      const topicNames = getVideoTopicNames(video);
-      const topics =
-        topicNames.length > 0
-          ? Array.from(new Set(topicNames))
-          : [uncategorizedTitle];
+      const topics = getVideoTopics(video);
+
+      if (topics.length === 0) {
+        const group = getOrCreateGroup(
+          UNCATEGORIZED_TOPIC_KEY,
+          uncategorizedTitle,
+          true,
+        );
+
+        addVideoToSection(
+          group,
+          {
+            key: UNCATEGORIZED_TOPIC_KEY,
+            title: uncategorizedTitle,
+            fullTitle: uncategorizedTitle,
+            isUncategorized: true,
+            isDirectRoot: true,
+          },
+          video,
+        );
+        continue;
+      }
 
       for (const topic of topics) {
-        const isUncategorized = topicNames.length === 0;
-        const key = isUncategorized
-          ? UNCATEGORIZED_TOPIC_KEY
-          : `topic:${topic.toLocaleLowerCase()}`;
+        const categoryName = topic.category?.name.trim();
+        const topicTitle = topic.name.trim();
+        if (!topicTitle) continue;
 
-        const existing = sectionsByKey.get(key);
+        const fullTitle = getTopicDisplayName(topic);
+        const isRootCategory = !categoryName;
+        const groupTitle = categoryName || topicTitle;
+        const groupKey = topic.category_id
+          ? `category:${topic.category_id}`
+          : `category:${groupTitle.toLocaleLowerCase()}`;
+        const sectionKey = categoryName
+          ? `subcategory:${topic.subcategory_id ?? fullTitle.toLocaleLowerCase()}`
+          : `${groupKey}:root`;
 
-        if (existing) {
-          existing.videos.push(video);
-        } else {
-          sectionsByKey.set(key, {
-            key,
-            title: topic,
-            videos: [video],
-            isUncategorized,
-          });
-        }
+        const group = getOrCreateGroup(groupKey, groupTitle, false);
+        addVideoToSection(
+          group,
+          {
+            key: sectionKey,
+            title: categoryName ? topicTitle : groupTitle,
+            fullTitle,
+            isUncategorized: false,
+            isDirectRoot: isRootCategory,
+          },
+          video,
+        );
       }
     }
 
-    return Array.from(sectionsByKey.values()).sort((a, b) => {
+    return Array.from(groupsByKey.values()).map((group) => ({
+      key: group.key,
+      title: group.title,
+      sections: group.sections.sort((a, b) => {
+        if (a.isDirectRoot !== b.isDirectRoot) {
+          return a.isDirectRoot ? -1 : 1;
+        }
+
+        return a.title.localeCompare(b.title, lang, { sensitivity: "base" });
+      }),
+      isUncategorized: group.isUncategorized,
+      videoCount: group.videoIds.size,
+    })).sort((a, b) => {
       if (a.isUncategorized !== b.isUncategorized) {
         return a.isUncategorized ? 1 : -1;
       }
@@ -214,8 +308,8 @@ export default function VideoGridList({
   );
 
   const handleTopicTitlePress = useCallback(
-    (section: TopicVideoSection) => {
-      if (section.isUncategorized) return;
+    (target: { key: string; title: string; isUncategorized: boolean }) => {
+      if (target.isUncategorized) return;
 
       const tapState = topicTapStateRef.current;
 
@@ -224,8 +318,8 @@ export default function VideoGridList({
         tapState.timeout = null;
       }
 
-      if (tapState.key !== section.key) {
-        tapState.key = section.key;
+      if (tapState.key !== target.key) {
+        tapState.key = target.key;
         tapState.count = 0;
       }
 
@@ -239,7 +333,7 @@ export default function VideoGridList({
           pathname: "/settings/add-video",
           params: {
             mode: "manage",
-            topic: section.title,
+            topic: target.title,
             authNonce: String(Date.now()),
           },
         });
@@ -263,10 +357,105 @@ export default function VideoGridList({
     };
   }, []);
 
-  const renderSection = useCallback(
-    ({ item: section }: ListRenderItemInfo<TopicVideoSection>) => {
+  const renderSectionRow = useCallback(
+    (section: TopicVideoSection, hideTitle: boolean) => {
       return (
-        <View style={[styles.topicSection, IS_WEB && styles.webTopicSection]}>
+        <View
+          key={section.key}
+          style={[
+            styles.subtopicSection,
+            hideTitle && styles.subtopicSectionWithoutTitle,
+          ]}
+        >
+          {!hideTitle ? (
+            <View
+              style={[
+                styles.subtopicHeader,
+                rtl && styles.topicHeaderReverse,
+              ]}
+            >
+              <Pressable
+                disabled={section.isUncategorized}
+                hitSlop={8}
+                onPress={() =>
+                  handleTopicTitlePress({
+                    key: section.key,
+                    title: section.fullTitle,
+                    isUncategorized: section.isUncategorized,
+                  })
+                }
+                style={styles.topicTitlePressable}
+              >
+                <Text
+                  style={[
+                    styles.subtopicTitle,
+                    {
+                      color: colors.text,
+                      textAlign: rtl ? "right" : "left",
+                      writingDirection: rtl ? "rtl" : "ltr",
+                    },
+                  ]}
+                  numberOfLines={1}
+                >
+                  {section.title}
+                </Text>
+              </Pressable>
+
+              <Text
+                style={[
+                  styles.subtopicCount,
+                  { color: colors.tabIconDefault },
+                  rtl && { textAlign: "left" },
+                ]}
+                numberOfLines={1}
+              >
+                {section.videos.length}
+              </Text>
+            </View>
+          ) : null}
+
+          <FlatList
+            data={section.videos}
+            horizontal
+            keyExtractor={(item) => item.id.toString()}
+            getItemLayout={getTopicItemLayout}
+            renderItem={renderVideo}
+            ItemSeparatorComponent={TopicCardSeparator}
+            keyboardShouldPersistTaps="handled"
+            nestedScrollEnabled
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={[
+              styles.rowContent,
+              IS_WEB && styles.webRowContent,
+            ]}
+            style={styles.rowList}
+          />
+        </View>
+      );
+    },
+    [
+      colors.tabIconDefault,
+      colors.text,
+      getTopicItemLayout,
+      handleTopicTitlePress,
+      renderVideo,
+      rtl,
+    ],
+  );
+
+  const renderGroup = useCallback(
+    ({ item: group }: ListRenderItemInfo<TopicVideoGroup>) => {
+      const directRootSections = group.sections.filter(
+        (section) => section.isDirectRoot,
+      );
+      const subtopicSections = group.sections.filter(
+        (section) => !section.isDirectRoot,
+      );
+      const hasSubtopicRows = subtopicSections.length > 0;
+      const hasMixedRows = directRootSections.length > 0 && hasSubtopicRows;
+
+      return (
+        <View style={[styles.topicGroup, IS_WEB && styles.webTopicGroup]}>
           <View
             style={[
               styles.topicHeader,
@@ -290,9 +479,15 @@ export default function VideoGridList({
               )}
 
               <Pressable
-                disabled={section.isUncategorized}
+                disabled={group.isUncategorized}
                 hitSlop={8}
-                onPress={() => handleTopicTitlePress(section)}
+                onPress={() =>
+                  handleTopicTitlePress({
+                    key: group.key,
+                    title: group.title,
+                    isUncategorized: group.isUncategorized,
+                  })
+                }
                 style={styles.topicTitlePressable}
               >
                 <Text
@@ -307,7 +502,7 @@ export default function VideoGridList({
                   ]}
                   numberOfLines={1}
                 >
-                  {section.title}
+                  {group.title}
                 </Text>
               </Pressable>
             </View>
@@ -322,26 +517,19 @@ export default function VideoGridList({
               ]}
               numberOfLines={1}
             >
-              {section.videos.length}
+              {group.videoCount}
             </Text>
           </View>
 
-          <FlatList
-            data={section.videos}
-            horizontal
-            keyExtractor={(item) => item.id.toString()}
-            getItemLayout={getTopicItemLayout}
-            renderItem={renderVideo}
-            ItemSeparatorComponent={TopicCardSeparator}
-            keyboardShouldPersistTaps="handled"
-            nestedScrollEnabled
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={[
-              styles.rowContent,
-              IS_WEB && styles.webRowContent,
-            ]}
-            style={styles.rowList}
-          />
+          <View style={hasSubtopicRows && styles.subtopicList}>
+            {directRootSections.map((section) =>
+              renderSectionRow(section, true),
+            )}
+            {hasMixedRows ? <View style={styles.mixedRowsSpacer} /> : null}
+            {subtopicSections.map((section) =>
+              renderSectionRow(section, false),
+            )}
+          </View>
         </View>
       );
     },
@@ -350,9 +538,8 @@ export default function VideoGridList({
       colors.tabIconDefault,
       colors.text,
       rtl,
-      getTopicItemLayout,
       handleTopicTitlePress,
-      renderVideo,
+      renderSectionRow,
     ],
   );
 
@@ -388,9 +575,9 @@ export default function VideoGridList({
     <FlatList
       key="topic-rows"
       style={IS_WEB && styles.webListFrame}
-      data={topicSections}
+      data={topicGroups}
       keyExtractor={(item) => item.key}
-      renderItem={renderSection}
+      renderItem={renderGroup}
       refreshing={refreshing}
       onRefresh={onRefresh}
       ListHeaderComponent={ListHeaderComponent}
@@ -414,23 +601,23 @@ const styles = StyleSheet.create({
     paddingHorizontal: HORIZONTAL_PADDING,
     paddingBottom: 30,
   },
-  topicSection: {
+  topicGroup: {
+    marginBottom: 30,
+  },
+  webTopicGroup: {
     marginBottom: 24,
   },
-  webTopicSection: {
-    marginBottom: 18,
-  },
   topicHeader: {
-    minHeight: 32,
-    marginBottom: 10,
+    minHeight: 34,
+    marginBottom: 12,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     gap: 12,
   },
   webTopicHeader: {
-    minHeight: 26,
-    marginBottom: 8,
+    minHeight: 28,
+    marginBottom: 10,
   },
   topicHeaderReverse: {
     flexDirection: "row-reverse",
@@ -456,10 +643,10 @@ const styles = StyleSheet.create({
     fontWeight: "900",
   },
   webTopicTitle: {
-    fontSize: 15,
-    lineHeight: 20,
+    fontSize: 16,
+    lineHeight: 21,
     fontWeight: "800",
-    letterSpacing: -0.2,
+    letterSpacing: 0,
   },
   topicCount: {
     minWidth: 28,
@@ -485,6 +672,41 @@ const styles = StyleSheet.create({
   },
   rowList: {
     overflow: "visible",
+  },
+  subtopicList: {
+    gap: 16,
+  },
+  mixedRowsSpacer: {
+    height: 2,
+  },
+  subtopicSection: {
+    marginBottom: 2,
+  },
+  subtopicSectionWithoutTitle: {
+    marginBottom: 0,
+  },
+  subtopicHeader: {
+    minHeight: 24,
+    marginBottom: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+  },
+  subtopicTitle: {
+    flex: 1,
+    minWidth: 0,
+    fontSize: IS_WEB ? 13 : 15,
+    lineHeight: IS_WEB ? 18 : 20,
+    fontWeight: "800",
+    letterSpacing: 0,
+  },
+  subtopicCount: {
+    minWidth: 24,
+    fontSize: 11,
+    lineHeight: 15,
+    fontWeight: "800",
+    textAlign: "right",
   },
   rowContent: {
     paddingTop: 2,
