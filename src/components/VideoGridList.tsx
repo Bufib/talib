@@ -7,8 +7,9 @@ import {
   getTopicDisplayName,
   getVideoTopics,
 } from "../../utils/videoTopics";
+import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
-import React, { useCallback, useEffect, useMemo, useRef } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   FlatList,
@@ -77,6 +78,12 @@ export default function VideoGridList({
   const { t } = useTranslation();
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme];
+  const [collapsedTopicGroups, setCollapsedTopicGroups] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [collapsedTopicSections, setCollapsedTopicSections] = useState<Set<string>>(
+    () => new Set(),
+  );
   const topicTapStateRef = useRef<{
     key: string | null;
     count: number;
@@ -357,8 +364,34 @@ export default function VideoGridList({
     };
   }, []);
 
+  const toggleTopicGroup = useCallback((key: string) => {
+    setCollapsedTopicGroups((current) => {
+      const next = new Set(current);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  }, []);
+
+  const toggleTopicSection = useCallback((key: string) => {
+    setCollapsedTopicSections((current) => {
+      const next = new Set(current);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  }, []);
+
   const renderSectionRow = useCallback(
     (section: TopicVideoSection, hideTitle: boolean) => {
+      const isCollapsed = collapsedTopicSections.has(section.key);
+
       return (
         <View
           key={section.key}
@@ -374,6 +407,21 @@ export default function VideoGridList({
                 rtl && styles.topicHeaderReverse,
               ]}
             >
+              <Pressable
+                accessibilityLabel={
+                  isCollapsed ? `${section.title} öffnen` : `${section.title} schließen`
+                }
+                hitSlop={8}
+                onPress={() => toggleTopicSection(section.key)}
+                style={styles.chevronButton}
+              >
+                <Ionicons
+                  name={isCollapsed ? "chevron-forward" : "chevron-down"}
+                  size={16}
+                  color={colors.tabIconDefault}
+                />
+              </Pressable>
+
               <Pressable
                 disabled={section.isUncategorized}
                 hitSlop={8}
@@ -414,37 +462,42 @@ export default function VideoGridList({
             </View>
           ) : null}
 
-          <FlatList
-            data={section.videos}
-            horizontal
-            keyExtractor={(item) => item.id.toString()}
-            getItemLayout={getTopicItemLayout}
-            renderItem={renderVideo}
-            ItemSeparatorComponent={TopicCardSeparator}
-            keyboardShouldPersistTaps="handled"
-            nestedScrollEnabled
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={[
-              styles.rowContent,
-              IS_WEB && styles.webRowContent,
-            ]}
-            style={styles.rowList}
-          />
+          {!isCollapsed ? (
+            <FlatList
+              data={section.videos}
+              horizontal
+              keyExtractor={(item) => item.id.toString()}
+              getItemLayout={getTopicItemLayout}
+              renderItem={renderVideo}
+              ItemSeparatorComponent={TopicCardSeparator}
+              keyboardShouldPersistTaps="handled"
+              nestedScrollEnabled
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={[
+                styles.rowContent,
+                IS_WEB && styles.webRowContent,
+              ]}
+              style={styles.rowList}
+            />
+          ) : null}
         </View>
       );
     },
     [
+      collapsedTopicSections,
       colors.tabIconDefault,
       colors.text,
       getTopicItemLayout,
       handleTopicTitlePress,
       renderVideo,
       rtl,
+      toggleTopicSection,
     ],
   );
 
   const renderGroup = useCallback(
     ({ item: group }: ListRenderItemInfo<TopicVideoGroup>) => {
+      const isGroupCollapsed = collapsedTopicGroups.has(group.key);
       const directRootSections = group.sections.filter(
         (section) => section.isDirectRoot,
       );
@@ -477,6 +530,22 @@ export default function VideoGridList({
                   ]}
                 />
               )}
+
+              <Pressable
+                accessibilityLabel={
+                  isGroupCollapsed ? `${group.title} öffnen` : `${group.title} schließen`
+                }
+                disabled={group.isUncategorized}
+                hitSlop={8}
+                onPress={() => toggleTopicGroup(group.key)}
+                style={styles.chevronButton}
+              >
+                <Ionicons
+                  name={isGroupCollapsed ? "chevron-forward" : "chevron-down"}
+                  size={18}
+                  color={colors.tabIconDefault}
+                />
+              </Pressable>
 
               <Pressable
                 disabled={group.isUncategorized}
@@ -521,25 +590,29 @@ export default function VideoGridList({
             </Text>
           </View>
 
-          <View style={hasSubtopicRows && styles.subtopicList}>
-            {directRootSections.map((section) =>
-              renderSectionRow(section, true),
-            )}
-            {hasMixedRows ? <View style={styles.mixedRowsSpacer} /> : null}
-            {subtopicSections.map((section) =>
-              renderSectionRow(section, false),
-            )}
-          </View>
+          {!isGroupCollapsed ? (
+            <View style={hasSubtopicRows && styles.subtopicList}>
+              {directRootSections.map((section) =>
+                renderSectionRow(section, true),
+              )}
+              {hasMixedRows ? <View style={styles.mixedRowsSpacer} /> : null}
+              {subtopicSections.map((section) =>
+                renderSectionRow(section, false),
+              )}
+            </View>
+          ) : null}
         </View>
       );
     },
     [
+      collapsedTopicGroups,
       colors.backgroundElement,
       colors.tabIconDefault,
       colors.text,
       rtl,
       handleTopicTitlePress,
       renderSectionRow,
+      toggleTopicGroup,
     ],
   );
 
@@ -630,6 +703,13 @@ const styles = StyleSheet.create({
   topicTitlePressable: {
     flex: 1,
     minWidth: 0,
+  },
+  chevronButton: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
   },
   webTopicAccent: {
     width: 4,

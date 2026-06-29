@@ -29,14 +29,15 @@ import Toast from "react-native-toast-message";
 import type { TopicType } from "@/constants/Types";
 import { supabase } from "../../../../utils/supabase";
 import {
+  buildTopicInput,
+  CATEGORY_SELECT,
   getVideoTopicNames,
   getVideoTopics,
   getTopicDisplayName,
   normalizeVideoRows,
   normalizeTopicRows,
   parseTopicInput,
-  parseTopicInputs,
-  TOPIC_WITH_PARENT_SELECT,
+  SUBCATEGORY_SELECT,
   type TopicInput,
   VIDEO_WITH_TOPICS_SELECT,
 } from "../../../../utils/videoTopics";
@@ -47,7 +48,8 @@ type ViewMode = "insert" | "manage";
 type SharedFieldKey =
   | "authorName"
   | "languageCode"
-  | "videoTopic"
+  | "categoryName"
+  | "subcategoryName"
   | "startTime"
   | "endTime";
 
@@ -71,6 +73,8 @@ type ManagedVideo = {
   youtube_url: string;
   created_at: string;
   language_code: string | null;
+  category: string | null;
+  subcategory: string | null;
   topics?: TopicType[];
   author_name: string | null;
   start_time: number | null;
@@ -94,14 +98,6 @@ type TopicRow = {
   count: number;
 };
 
-type TopicAssignmentRow = {
-  categoryId: number;
-  subcategoryId: number | null;
-  name: string;
-  parentName: string | null;
-  label: string;
-};
-
 type Feedback = {
   type: "error" | "success";
   message: string;
@@ -114,6 +110,8 @@ type VideoInsertPayload = {
   author_name: string | null;
   start_time: number | null;
   end_time: number | null;
+  category: string | null;
+  subcategory: string | null;
 };
 
 type PreparedVideoPayload = {
@@ -142,7 +140,8 @@ type PreparedVideo = {
 const initialSharedValues: SharedValues = {
   authorName: "",
   languageCode: "",
-  videoTopic: "",
+  categoryName: "",
+  subcategoryName: "",
   startTime: "",
   endTime: "",
 };
@@ -150,7 +149,8 @@ const initialSharedValues: SharedValues = {
 const initialSharedFields: SharedFieldState = {
   authorName: true,
   languageCode: true,
-  videoTopic: true,
+  categoryName: true,
+  subcategoryName: true,
   startTime: false,
   endTime: false,
 };
@@ -187,9 +187,14 @@ const sharedFieldDefinitions: FieldDefinition<SharedFieldKey>[] = [
     autoCorrect: false,
   },
   {
-    key: "videoTopic",
-    label: "Thema",
-    placeholder: "Oberkategorie > Unterkategorie, weiteres Thema",
+    key: "categoryName",
+    label: "Oberkategorie",
+    placeholder: "z.B. Gottesdienst",
+  },
+  {
+    key: "subcategoryName",
+    label: "Unterkategorie",
+    placeholder: "Optional, z.B. Gebet",
   },
   {
     key: "startTime",
@@ -236,7 +241,8 @@ function createVideoDraft(video: ManagedVideo): VideoDraft {
     youtubeUrl: video.youtube_url ?? "",
     authorName: video.author_name ?? "",
     languageCode: video.language_code ?? "",
-    videoTopic: serializeTopicList(getVideoTopicNames(video)) ?? "",
+    categoryName: video.category ?? "",
+    subcategoryName: video.subcategory ?? "",
     startTime: video.start_time == null ? "" : String(video.start_time),
     endTime: video.end_time == null ? "" : String(video.end_time),
   };
@@ -337,10 +343,18 @@ function buildVideoPayloadFromDraft(
   const youtubeUrl = draft.youtubeUrl.trim();
   const authorName = optionalText(draft.authorName);
   const languageCode = optionalText(draft.languageCode)?.toLowerCase() ?? null;
-  const topicInputs = parseTopicInputs(draft.videoTopic);
+  const categoryName = optionalText(draft.categoryName);
+  const subcategoryName = optionalText(draft.subcategoryName);
+  const topicInput = buildTopicInput(categoryName, subcategoryName);
 
   if (!title || !youtubeUrl) {
     throw new Error(`${rowLabel}: Titel und YouTube URL sind Pflicht.`);
+  }
+
+  if (subcategoryName && !categoryName) {
+    throw new Error(
+      `${rowLabel}: Für eine Unterkategorie muss eine Oberkategorie gesetzt sein.`,
+    );
   }
 
   if (!getYoutubeVideoId(youtubeUrl)) {
@@ -364,30 +378,11 @@ function buildVideoPayloadFromDraft(
       author_name: authorName,
       start_time: startTime,
       end_time: endTime,
+      category: categoryName,
+      subcategory: subcategoryName,
     },
-    topicInputs,
+    topicInputs: topicInput.label ? [topicInput] : [],
   };
-}
-
-function normalizeTopicList(topics: string[]) {
-  const seen = new Set<string>();
-  const normalizedTopics: string[] = [];
-
-  for (const topic of topics) {
-    const normalizedTopic = topic.trim();
-    const key = normalizedTopic.toLocaleLowerCase("de");
-
-    if (!normalizedTopic || seen.has(key)) continue;
-    seen.add(key);
-    normalizedTopics.push(normalizedTopic);
-  }
-
-  return normalizedTopics;
-}
-
-function serializeTopicList(topics: string[]) {
-  const normalizedTopics = normalizeTopicList(topics);
-  return normalizedTopics.length > 0 ? normalizedTopics.join(", ") : null;
 }
 
 async function ensureAuthorsExist(authorNames: (string | null)[]) {
@@ -413,30 +408,35 @@ function normalizeTopicInputs(topicInputs: TopicInput[]) {
   const normalizedInputs: TopicInput[] = [];
 
   for (const input of topicInputs) {
-    const name = input.name.trim();
-    const parentName = input.parentName?.trim() || null;
-    const label = parentName ? `${parentName} > ${name}` : name;
-    const key = label.toLocaleLowerCase("de");
+    const categoryName = input.categoryName?.trim() || null;
+    const subcategoryName = input.subcategoryName?.trim() || null;
+    const label = input.label?.trim() || null;
 
-    if (!name || seen.has(key)) continue;
-    if (parentName?.toLocaleLowerCase("de") === name.toLocaleLowerCase("de")) {
-      throw new Error(`"${name}" kann nicht seine eigene Oberkategorie sein.`);
+    if (!label) continue;
+    if (subcategoryName && !categoryName) {
+      throw new Error(
+        `"${subcategoryName}" braucht eine Oberkategorie, bevor es gespeichert werden kann.`,
+      );
     }
 
+    const key = label.toLocaleLowerCase("de");
+    if (seen.has(key)) continue;
     seen.add(key);
-    normalizedInputs.push({ name, parentName, label });
+    normalizedInputs.push({ categoryName, subcategoryName, label });
   }
 
   const parentNamesWithChildren = new Set(
     normalizedInputs
-      .map((input) => input.parentName)
-      .filter((parentName): parentName is string => Boolean(parentName))
-      .map((parentName) => parentName.toLocaleLowerCase("de")),
+      .filter((input) => input.categoryName && input.subcategoryName)
+      .map((input) => input.categoryName?.toLocaleLowerCase("de")),
   );
 
   return normalizedInputs.filter((input) => {
-    if (input.parentName) return true;
-    return !parentNamesWithChildren.has(input.name.toLocaleLowerCase("de"));
+    if (input.subcategoryName) return true;
+    if (!input.categoryName) return false;
+    return !parentNamesWithChildren.has(
+      input.categoryName.toLocaleLowerCase("de"),
+    );
   });
 }
 
@@ -445,318 +445,37 @@ async function ensureTopicsExist(topicInputs: TopicInput[]) {
   if (normalizedInputs.length === 0) return [];
 
   const categoryNames = [
-    ...new Set(normalizedInputs.map((input) => input.parentName ?? input.name)),
+    ...new Set(
+      normalizedInputs
+        .map((input) => input.categoryName)
+        .filter((name): name is string => Boolean(name)),
+    ),
+  ];
+  const subcategoryNames = [
+    ...new Set(
+      normalizedInputs
+        .map((input) => input.subcategoryName)
+        .filter((name): name is string => Boolean(name)),
+    ),
   ];
 
-  const { error: categoryUpsertError } = await supabase
-    .from("topic_categories")
-    .upsert(
+  if (categoryNames.length > 0) {
+    const { error } = await supabase.from("topic_categories").upsert(
       categoryNames.map((name) => ({ name })),
       { onConflict: "name" },
     );
-
-  if (categoryUpsertError) throw categoryUpsertError;
-
-  const { data: categoryRows, error: categoryRowsError } = await supabase
-    .from("topic_categories")
-    .select("id, name")
-    .in("name", categoryNames);
-
-  if (categoryRowsError) throw categoryRowsError;
-
-  const categoriesByName = new Map<string, { id: number; name: string }>();
-  for (const row of categoryRows ?? []) {
-    if (typeof row.id === "number" && typeof row.name === "string") {
-      categoriesByName.set(row.name, { id: row.id, name: row.name });
-    }
+    if (error) throw error;
   }
 
-  if (categoriesByName.size !== categoryNames.length) {
-    throw new Error("Nicht alle Oberkategorien konnten angelegt werden.");
-  }
-
-  const subcategoryPayloads = normalizedInputs
-    .filter((input) => input.parentName)
-    .map((input) => {
-      const category = categoriesByName.get(input.parentName as string);
-      if (!category) {
-        throw new Error(`"${input.parentName}" wurde nicht gefunden.`);
-      }
-
-      return {
-        category_id: category.id,
-        name: input.name,
-      };
-    });
-
-  if (subcategoryPayloads.length > 0) {
-    const { error: subcategoryUpsertError } = await supabase
-      .from("topic_subcategories")
-      .upsert(subcategoryPayloads, { onConflict: "category_id,name" });
-
-    if (subcategoryUpsertError) throw subcategoryUpsertError;
-  }
-
-  const subcategoriesByKey = new Map<
-    string,
-    { id: number; category_id: number; name: string }
-  >();
-
-  if (subcategoryPayloads.length > 0) {
-    const categoryIds = [
-      ...new Set(subcategoryPayloads.map((payload) => payload.category_id)),
-    ];
-    const { data: subcategoryRows, error: subcategoryRowsError } = await supabase
-      .from("topic_subcategories")
-      .select("id, category_id, name")
-      .in("category_id", categoryIds);
-
-    if (subcategoryRowsError) throw subcategoryRowsError;
-
-    const requestedKeys = new Set(
-      subcategoryPayloads.map(
-        (payload) =>
-          `${payload.category_id}::${payload.name.toLocaleLowerCase("de")}`,
-      ),
+  if (subcategoryNames.length > 0) {
+    const { error } = await supabase.from("topic_subcategories").upsert(
+      subcategoryNames.map((name) => ({ name })),
+      { onConflict: "name" },
     );
-
-    for (const row of subcategoryRows ?? []) {
-      if (
-        typeof row.id !== "number" ||
-        typeof row.category_id !== "number" ||
-        typeof row.name !== "string"
-      ) {
-        continue;
-      }
-
-      const key = `${row.category_id}::${row.name.toLocaleLowerCase("de")}`;
-      if (requestedKeys.has(key)) {
-        subcategoriesByKey.set(key, {
-          id: row.id,
-          category_id: row.category_id,
-          name: row.name,
-        });
-      }
-    }
+    if (error) throw error;
   }
 
-  return normalizedInputs.map((input): TopicAssignmentRow => {
-    const categoryName = input.parentName ?? input.name;
-    const category = categoriesByName.get(categoryName);
-
-    if (!category) {
-      throw new Error(`"${categoryName}" wurde nicht gefunden.`);
-    }
-
-    if (!input.parentName) {
-      return {
-        categoryId: category.id,
-        subcategoryId: null,
-        name: input.name,
-        parentName: null,
-        label: input.label,
-      };
-    }
-
-    const subcategoryKey = `${category.id}::${input.name.toLocaleLowerCase(
-      "de",
-    )}`;
-    const subcategory = subcategoriesByKey.get(subcategoryKey);
-
-    if (!subcategory) {
-      throw new Error(`"${input.label}" konnte nicht angelegt werden.`);
-    }
-
-    return {
-      categoryId: category.id,
-      subcategoryId: subcategory.id,
-      name: input.name,
-      parentName: input.parentName,
-      label: input.label,
-    };
-  });
-}
-
-async function replaceVideoTopics(videoId: number, topicInputs: TopicInput[]) {
-  const topicRows = await ensureTopicsExist(topicInputs);
-
-  const { error: deleteError } = await supabase
-    .from("video_category_assignments")
-    .delete()
-    .eq("video_id", videoId);
-
-  if (deleteError) throw deleteError;
-
-  if (topicRows.length === 0) return;
-
-  const rows = topicRows.map((topic) => ({
-    video_id: videoId,
-    category_id: topic.categoryId,
-    subcategory_id: topic.subcategoryId,
-  }));
-
-  const { error: insertError } = await supabase
-    .from("video_category_assignments")
-    .insert(rows);
-
-  if (insertError) throw insertError;
-}
-
-function assertTopicRowIds(topicRow: TopicRow) {
-  if (!topicRow.categoryId) {
-    throw new Error(`"${topicRow.topic}" wurde nicht gefunden.`);
-  }
-}
-
-async function getAssignedVideoIdsForTopic(topicRow: TopicRow) {
-  assertTopicRowIds(topicRow);
-
-  let request = supabase
-    .from("video_category_assignments")
-    .select("video_id");
-
-  request = topicRow.subcategoryId
-    ? request.eq("subcategory_id", topicRow.subcategoryId)
-    : request.eq("category_id", topicRow.categoryId as number).is("subcategory_id", null);
-
-  const { data, error } = await request;
-  if (error) throw error;
-
-  return [
-    ...new Set(
-      (data ?? [])
-        .map((row) => row.video_id)
-        .filter((videoId): videoId is number => typeof videoId === "number"),
-    ),
-  ];
-}
-
-async function getAssignedVideoIdsForTarget(
-  categoryId: number,
-  subcategoryId: number | null,
-) {
-  let request = supabase
-    .from("video_category_assignments")
-    .select("video_id")
-    .eq("category_id", categoryId);
-
-  request = subcategoryId
-    ? request.eq("subcategory_id", subcategoryId)
-    : request.is("subcategory_id", null);
-
-  const { data, error } = await request;
-  if (error) throw error;
-
-  return new Set(
-    (data ?? [])
-      .map((row) => row.video_id)
-      .filter((videoId): videoId is number => typeof videoId === "number"),
-  );
-}
-
-async function deleteAssignmentsForTopic(topicRow: TopicRow) {
-  assertTopicRowIds(topicRow);
-
-  let request = supabase.from("video_category_assignments").delete();
-  request = topicRow.subcategoryId
-    ? request.eq("subcategory_id", topicRow.subcategoryId)
-    : request.eq("category_id", topicRow.categoryId as number).is("subcategory_id", null);
-
-  const { error } = await request;
-  if (error) throw error;
-}
-
-async function moveAssignmentsToTarget(
-  topicRow: TopicRow,
-  target: TopicAssignmentRow,
-) {
-  assertTopicRowIds(topicRow);
-
-  if (
-    topicRow.categoryId === target.categoryId &&
-    topicRow.subcategoryId === target.subcategoryId
-  ) {
-    return;
-  }
-
-  const currentVideoIds = await getAssignedVideoIdsForTopic(topicRow);
-  const existingTargetVideoIds = await getAssignedVideoIdsForTarget(
-    target.categoryId,
-    target.subcategoryId,
-  );
-  const rowsToInsert = currentVideoIds
-    .filter((videoId) => !existingTargetVideoIds.has(videoId))
-    .map((videoId) => ({
-      video_id: videoId,
-      category_id: target.categoryId,
-      subcategory_id: target.subcategoryId,
-    }));
-
-  if (rowsToInsert.length > 0) {
-    const { error: insertError } = await supabase
-      .from("video_category_assignments")
-      .insert(rowsToInsert);
-
-    if (insertError) throw insertError;
-  }
-
-  await deleteAssignmentsForTopic(topicRow);
-}
-
-async function deleteSubcategoryIfUnused(subcategoryId: number) {
-  const { data: assignmentRows, error: assignmentError } = await supabase
-    .from("video_category_assignments")
-    .select("id")
-    .eq("subcategory_id", subcategoryId)
-    .limit(1);
-
-  if (assignmentError) throw assignmentError;
-  if ((assignmentRows ?? []).length > 0) return;
-
-  const { error: deleteError } = await supabase
-    .from("topic_subcategories")
-    .delete()
-    .eq("id", subcategoryId);
-
-  if (deleteError) throw deleteError;
-}
-
-async function deleteCategoryIfUnused(categoryId: number) {
-  const [assignmentResult, subcategoryResult] = await Promise.all([
-    supabase
-      .from("video_category_assignments")
-      .select("id")
-      .eq("category_id", categoryId)
-      .limit(1),
-    supabase
-      .from("topic_subcategories")
-      .select("id")
-      .eq("category_id", categoryId)
-      .limit(1),
-  ]);
-
-  if (assignmentResult.error) throw assignmentResult.error;
-  if (subcategoryResult.error) throw subcategoryResult.error;
-  if ((assignmentResult.data ?? []).length > 0) return;
-  if ((subcategoryResult.data ?? []).length > 0) return;
-
-  const { error: deleteError } = await supabase
-    .from("topic_categories")
-    .delete()
-    .eq("id", categoryId);
-
-  if (deleteError) throw deleteError;
-}
-
-async function getSubcategoryCount(categoryId: number) {
-  const { data, error } = await supabase
-    .from("topic_subcategories")
-    .select("id")
-    .eq("category_id", categoryId)
-    .limit(1);
-
-  if (error) throw error;
-  return (data ?? []).length;
+  return normalizedInputs;
 }
 
 function confirmDestructiveAction(title: string, message: string) {
@@ -897,7 +616,12 @@ export default function AddVideo() {
     setManagementFeedback(null);
 
     try {
-      const [authorsResult, videosResult, topicsResult] = await Promise.all([
+      const [
+        authorsResult,
+        videosResult,
+        categoriesResult,
+        subcategoriesResult,
+      ] = await Promise.all([
         supabase
           .from("authors")
           .select("id, created_at, author_name")
@@ -909,17 +633,25 @@ export default function AddVideo() {
           .order("id", { ascending: false }),
         supabase
           .from("topic_categories")
-          .select(TOPIC_WITH_PARENT_SELECT)
+          .select(CATEGORY_SELECT)
+          .order("name", { ascending: true }),
+        supabase
+          .from("topic_subcategories")
+          .select(SUBCATEGORY_SELECT)
           .order("name", { ascending: true }),
       ]);
 
       if (videosResult.error) throw videosResult.error;
-      if (topicsResult.error) throw topicsResult.error;
+      if (categoriesResult.error) throw categoriesResult.error;
+      if (subcategoriesResult.error) throw subcategoriesResult.error;
 
       const nextManagedVideos = normalizeVideoRows(
         videosResult.data,
       ) as ManagedVideo[];
-      const nextTopicCatalog = normalizeTopicRows(topicsResult.data);
+      const nextTopicCatalog = normalizeTopicRows(
+        categoriesResult.data,
+        subcategoriesResult.data,
+      );
       const nextAuthors = mergeAuthorsFromSources(
         authorsResult.error
           ? []
@@ -997,6 +729,8 @@ export default function AddVideo() {
 
   const topicRows = useMemo<TopicRow[]>(() => {
     const rows = new Map<string, TopicRow>();
+    const categoryIdsByName = new Map<string, number>();
+    const subcategoryIdsByName = new Map<string, number>();
 
     for (const topic of topicCatalog) {
       const displayName = getTopicDisplayName(topic);
@@ -1009,6 +743,12 @@ export default function AddVideo() {
         topic: displayName,
         count: 0,
       });
+
+      if (topic.subcategory_id) {
+        subcategoryIdsByName.set(topic.name, topic.subcategory_id);
+      } else {
+        categoryIdsByName.set(topic.name, topic.category_id ?? topic.id);
+      }
     }
 
     for (const video of managedVideos) {
@@ -1016,10 +756,21 @@ export default function AddVideo() {
         const displayName = getTopicDisplayName(topic);
         const key = topic.key || `topic:${displayName}`;
         const existing = rows.get(key);
+        const categoryName = topic.category?.name ?? topic.name;
         rows.set(key, {
-          id: existing?.id && existing.id > 0 ? existing.id : topic.id,
-          categoryId: existing?.categoryId ?? topic.category_id,
-          subcategoryId: existing?.subcategoryId ?? topic.subcategory_id,
+          id:
+            existing?.id && existing.id > 0
+              ? existing.id
+              : topic.subcategory_id
+                ? subcategoryIdsByName.get(topic.name) ?? topic.id
+                : categoryIdsByName.get(topic.name) ?? topic.id,
+          categoryId:
+            existing?.categoryId ?? categoryIdsByName.get(categoryName) ?? null,
+          subcategoryId:
+            existing?.subcategoryId ??
+            (topic.subcategory_id
+              ? subcategoryIdsByName.get(topic.name) ?? topic.subcategory_id
+              : null),
           name: existing?.name ?? topic.name,
           parentName: existing?.parentName ?? topic.category?.name ?? null,
           topic: existing?.topic ?? displayName,
@@ -1152,7 +903,8 @@ export default function AddVideo() {
           youtubeUrl: video.youtubeUrl,
           authorName: getResolvedValue(video, "authorName"),
           languageCode: getResolvedValue(video, "languageCode"),
-          videoTopic: getResolvedValue(video, "videoTopic"),
+          categoryName: getResolvedValue(video, "categoryName"),
+          subcategoryName: getResolvedValue(video, "subcategoryName"),
           startTime: getResolvedValue(video, "startTime"),
           endTime: getResolvedValue(video, "endTime"),
         },
@@ -1234,6 +986,9 @@ export default function AddVideo() {
     try {
       await assertNoExistingDuplicates(preparedVideos);
       await ensureAuthorsExist(preparedVideos.map((video) => video.authorName));
+      await ensureTopicsExist(
+        preparedVideos.flatMap((video) => video.topicInputs),
+      );
 
       const { data: insertedVideos, error: insertError } = await supabase
         .from("videos")
@@ -1246,12 +1001,6 @@ export default function AddVideo() {
       if (insertedRows.length !== preparedVideos.length) {
         throw new Error("Nicht alle eingefügten Videos wurden zurückgegeben.");
       }
-
-      await Promise.all(
-        insertedRows.map((video, index) =>
-          replaceVideoTopics(video.id, preparedVideos[index].topicInputs),
-        ),
-      );
 
       await invalidateVideoCaches();
       if (managementLoaded) await loadManagementData();
@@ -1624,6 +1373,7 @@ export default function AddVideo() {
 
     try {
       await ensureAuthorsExist([payload.author_name]);
+      await ensureTopicsExist(preparedPayload.topicInputs);
 
       const { error } = await supabase
         .from("videos")
@@ -1631,8 +1381,6 @@ export default function AddVideo() {
         .eq("id", videoId);
 
       if (error) throw error;
-
-      await replaceVideoTopics(videoId, preparedPayload.topicInputs);
 
       await invalidateVideoCaches();
       await loadManagementData();
@@ -1734,13 +1482,14 @@ export default function AddVideo() {
     if (!parsedTopic) return;
 
     const explicitParentName = optionalText(newTopicParentName);
-    const topicInput: TopicInput = {
-      name: parsedTopic.name,
-      parentName: explicitParentName ?? parsedTopic.parentName,
-      label: explicitParentName
-        ? `${explicitParentName} > ${parsedTopic.name}`
-        : parsedTopic.label,
-    };
+    const topicInput = explicitParentName
+      ? buildTopicInput(
+          explicitParentName,
+          parsedTopic.subcategoryName ?? parsedTopic.categoryName,
+        )
+      : parsedTopic;
+
+    if (!topicInput.label) return;
 
     setIsManagementSaving(true);
     setManagementFeedback(null);
@@ -1753,8 +1502,10 @@ export default function AddVideo() {
       setNewTopicName("");
       setNewTopicParentName("");
       setSelectedTopic(topicInput.label);
-      setTopicDraftName(topicInput.name);
-      setTopicParentDraftName(topicInput.parentName ?? "");
+      setTopicDraftName(topicInput.subcategoryName ?? topicInput.categoryName ?? "");
+      setTopicParentDraftName(topicInput.categoryName && topicInput.subcategoryName
+        ? topicInput.categoryName
+        : "");
       setManagementFeedback({
         type: "success",
         message: `"${topicInput.label}" wurde hinzugefügt.`,
@@ -1785,10 +1536,11 @@ export default function AddVideo() {
       (topicRow) => topicRow.topic === currentTopic,
     );
     const parsedNextTopic = parseTopicInput(topicDraftName.trim());
-    const nextTopic = parsedNextTopic?.name ?? "";
-    const nextParentTopic = optionalText(topicParentDraftName)
-      ?? parsedNextTopic?.parentName
-      ?? null;
+    const nextTopic =
+      parsedNextTopic?.subcategoryName ?? parsedNextTopic?.categoryName ?? "";
+    const nextParentTopic =
+      optionalText(topicParentDraftName) ??
+      (parsedNextTopic?.subcategoryName ? parsedNextTopic.categoryName : null);
 
     if (!currentTopic || !currentTopicRow) {
       setManagementFeedback({
@@ -1826,46 +1578,53 @@ export default function AddVideo() {
     setManagementFeedback(null);
 
     try {
-      assertTopicRowIds(currentTopicRow);
+      const targetInput = buildTopicInput(
+        nextParentTopic ?? nextTopic,
+        nextParentTopic ? nextTopic : null,
+      );
+      await ensureTopicsExist(targetInput.label ? [targetInput] : []);
 
-      if (!currentTopicRow.subcategoryId && !nextParentTopic) {
+      if (!currentTopicRow.parentName && !nextParentTopic) {
         const { error } = await supabase
           .from("topic_categories")
           .update({ name: nextTopic })
-          .eq("id", currentTopicRow.categoryId as number);
+          .eq(
+            currentTopicRow.categoryId ? "id" : "name",
+            currentTopicRow.categoryId ?? currentTopicRow.name,
+          );
 
         if (error) throw error;
       } else {
-        if (!currentTopicRow.subcategoryId && nextParentTopic) {
-          const childCount = await getSubcategoryCount(
-            currentTopicRow.categoryId as number,
-          );
+        const sourceRequest = currentTopicRow.parentName
+          ? supabase
+              .from("videos")
+              .update({
+                category: nextParentTopic ?? currentTopicRow.parentName,
+                subcategory: nextTopic,
+              })
+              .eq("category", currentTopicRow.parentName)
+              .eq("subcategory", currentTopicRow.name)
+          : supabase
+              .from("videos")
+              .update({
+                category: nextParentTopic,
+                subcategory: nextTopic,
+              })
+              .eq("category", currentTopicRow.name)
+              .is("subcategory", null);
 
-          if (childCount > 0) {
-            throw new Error(
-              "Diese Oberkategorie hat Unterkategorien. Benenne sie um oder lege eine neue Unterkategorie an.",
-            );
+        const { error } = await sourceRequest;
+        if (error) throw error;
+
+        if (currentTopicRow.parentName && currentTopicRow.subcategoryId) {
+          const { error: subcategoryError } = await supabase
+            .from("topic_subcategories")
+            .update({ name: nextTopic })
+            .eq("id", currentTopicRow.subcategoryId);
+
+          if (subcategoryError && !isUniqueConstraintError(subcategoryError)) {
+            throw subcategoryError;
           }
-        }
-
-        const [targetTopic] = await ensureTopicsExist([
-          {
-            name: nextTopic,
-            parentName: nextParentTopic,
-            label: nextTopicLabel,
-          },
-        ]);
-
-        if (!targetTopic) {
-          throw new Error(`"${nextTopicLabel}" konnte nicht angelegt werden.`);
-        }
-
-        await moveAssignmentsToTarget(currentTopicRow, targetTopic);
-
-        if (currentTopicRow.subcategoryId) {
-          await deleteSubcategoryIfUnused(currentTopicRow.subcategoryId);
-        } else {
-          await deleteCategoryIfUnused(currentTopicRow.categoryId as number);
         }
       }
 
@@ -1935,7 +1694,19 @@ export default function AddVideo() {
         throw new Error(`"${currentTopic}" wurde nicht gefunden.`);
       }
 
-      await deleteAssignmentsForTopic(currentTopicRow);
+      const request = currentTopicRow.parentName
+        ? supabase
+            .from("videos")
+            .update({ subcategory: null })
+            .eq("category", currentTopicRow.parentName)
+            .eq("subcategory", currentTopicRow.name)
+        : supabase
+            .from("videos")
+            .update({ category: null, subcategory: null })
+            .eq("category", currentTopicRow.name);
+
+      const { error } = await request;
+      if (error) throw error;
 
       await invalidateVideoCaches();
       await loadManagementData();

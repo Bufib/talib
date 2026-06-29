@@ -14,36 +14,17 @@ export const VIDEO_WITH_TOPICS_SELECT = `
   author_name,
   start_time,
   end_time,
-  video_category_assignments (
-    id,
-    category_id,
-    subcategory_id,
-    topic_categories (
-      id,
-      name
-    ),
-    topic_subcategories (
-      id,
-      category_id,
-      name
-    )
-  )
+  category,
+  subcategory
 `;
 
-export const TOPIC_WITH_PARENT_SELECT = `
-  id,
-  name,
-  topic_subcategories (
-    id,
-    category_id,
-    name
-  )
-`;
+export const CATEGORY_SELECT = "id, name";
+export const SUBCATEGORY_SELECT = "id, name";
 
 export type TopicInput = {
-  name: string;
-  parentName: string | null;
-  label: string;
+  categoryName: string | null;
+  subcategoryName: string | null;
+  label: string | null;
 };
 
 export function parseTopics(raw: unknown): string[] {
@@ -56,9 +37,7 @@ export function parseTopics(raw: unknown): string[] {
       .filter(Boolean);
   }
 
-  if (typeof raw !== "string") {
-    return [];
-  }
+  if (typeof raw !== "string") return [];
 
   const trimmed = raw.trim();
   if (!trimmed) return [];
@@ -83,125 +62,82 @@ export function parseTopics(raw: unknown): string[] {
     .filter(Boolean);
 }
 
-function firstRelationValue(value: unknown) {
-  if (Array.isArray(value)) return value[0] ?? null;
-  return value ?? null;
-}
-
-function relationArray(value: unknown) {
-  if (Array.isArray(value)) return value;
-  if (value == null) return [];
-  return [value];
+function normalizeName(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
 }
 
 function maybeCategory(value: unknown): TopicCategoryType | null {
   if (!value || typeof value !== "object") return null;
 
-  const category = value as {
-    id?: unknown;
-    name?: unknown;
-  };
-
-  if (typeof category.name !== "string") return null;
+  const row = value as { id?: unknown; name?: unknown };
+  const name = normalizeName(row.name);
+  if (!name) return null;
 
   return {
-    id: typeof category.id === "number" ? category.id : 0,
-    name: category.name.trim(),
+    id: typeof row.id === "number" ? row.id : 0,
+    name,
   };
 }
 
 function maybeSubcategory(value: unknown): TopicSubcategoryType | null {
   if (!value || typeof value !== "object") return null;
 
-  const subcategory = value as {
-    id?: unknown;
-    category_id?: unknown;
-    name?: unknown;
-  };
-
-  if (typeof subcategory.name !== "string") return null;
+  const row = value as { id?: unknown; name?: unknown };
+  const name = normalizeName(row.name);
+  if (!name) return null;
 
   return {
-    id: typeof subcategory.id === "number" ? subcategory.id : 0,
-    category_id:
-      typeof subcategory.category_id === "number" ? subcategory.category_id : 0,
-    name: subcategory.name.trim(),
+    id: typeof row.id === "number" ? row.id : 0,
+    name,
   };
 }
 
-function makeCategoryTopic(category: TopicCategoryType): TopicType {
+function makeCategoryTopic(categoryName: string, categoryId = 0): TopicType {
   return {
-    key: `category:${category.id || category.name.toLocaleLowerCase("de")}`,
-    id: category.id,
-    name: category.name,
-    category_id: category.id,
+    key: `category:${categoryName.toLocaleLowerCase("de")}`,
+    id: categoryId,
+    name: categoryName,
+    category_id: categoryId || null,
     subcategory_id: null,
     category: null,
   };
 }
 
 function makeSubcategoryTopic(
-  category: TopicCategoryType,
-  subcategory: TopicSubcategoryType,
+  categoryName: string,
+  subcategoryName: string,
+  categoryId = 0,
+  subcategoryId = 0,
 ): TopicType {
+  const category = {
+    id: categoryId,
+    name: categoryName,
+  };
+
   return {
-    key: `subcategory:${category.id || category.name.toLocaleLowerCase("de")}:${
-      subcategory.id || subcategory.name.toLocaleLowerCase("de")
-    }`,
-    id: subcategory.id,
-    name: subcategory.name,
-    category_id: category.id || subcategory.category_id,
-    subcategory_id: subcategory.id || null,
+    key: `subcategory:${categoryName.toLocaleLowerCase(
+      "de",
+    )}:${subcategoryName.toLocaleLowerCase("de")}`,
+    id: subcategoryId,
+    name: subcategoryName,
+    category_id: categoryId || null,
+    subcategory_id: subcategoryId || null,
     category,
   };
 }
 
-export function normalizeTopicRow(row: unknown): TopicType | null {
-  const category = maybeCategory(row);
-  return category ? makeCategoryTopic(category) : null;
-}
+function topicFromVideoCategory(
+  category: unknown,
+  subcategory: unknown,
+): TopicType | null {
+  const categoryName = normalizeName(category);
+  const subcategoryName = normalizeName(subcategory);
 
-export function normalizeTopicRows(rows: unknown[] | null | undefined) {
-  const topics: TopicType[] = [];
+  if (!categoryName && !subcategoryName) return null;
+  if (!categoryName) return makeCategoryTopic(subcategoryName);
+  if (!subcategoryName) return makeCategoryTopic(categoryName);
 
-  for (const row of rows ?? []) {
-    const category = maybeCategory(row);
-    if (!category) continue;
-
-    topics.push(makeCategoryTopic(category));
-
-    const rawSubcategories =
-      row && typeof row === "object"
-        ? (row as { topic_subcategories?: unknown }).topic_subcategories
-        : null;
-
-    for (const subcategoryRow of relationArray(rawSubcategories)) {
-      const subcategory = maybeSubcategory(subcategoryRow);
-      if (!subcategory) continue;
-      topics.push(makeSubcategoryTopic(category, subcategory));
-    }
-  }
-
-  return dedupeTopics(topics);
-}
-
-function topicFromVideoCategoryAssignment(value: unknown): TopicType | null {
-  if (!value || typeof value !== "object") return null;
-
-  const relation = value as {
-    topic_categories?: unknown;
-    topic_subcategories?: unknown;
-  };
-  const category = maybeCategory(firstRelationValue(relation.topic_categories));
-  if (!category) return null;
-
-  const subcategory = maybeSubcategory(
-    firstRelationValue(relation.topic_subcategories),
-  );
-
-  return subcategory
-    ? makeSubcategoryTopic(category, subcategory)
-    : makeCategoryTopic(category);
+  return makeSubcategoryTopic(categoryName, subcategoryName);
 }
 
 function dedupeTopics(topics: TopicType[]) {
@@ -222,19 +158,43 @@ function dedupeTopics(topics: TopicType[]) {
   return uniqueTopics;
 }
 
+export function normalizeTopicRows(
+  categories: unknown[] | null | undefined,
+  subcategories: unknown[] | null | undefined = [],
+) {
+  const topics: TopicType[] = [];
+
+  for (const row of categories ?? []) {
+    const category = maybeCategory(row);
+    if (!category) continue;
+    topics.push(makeCategoryTopic(category.name, category.id));
+  }
+
+  for (const row of subcategories ?? []) {
+    const subcategory = maybeSubcategory(row);
+    if (!subcategory) continue;
+    topics.push({
+      key: `subcategory:${subcategory.name.toLocaleLowerCase("de")}`,
+      id: subcategory.id,
+      name: subcategory.name,
+      category_id: null,
+      subcategory_id: subcategory.id,
+      category: null,
+    });
+  }
+
+  return dedupeTopics(topics);
+}
+
 export function normalizeVideoRow(row: unknown): VideoType {
   const video = (row ?? {}) as Record<string, unknown>;
-  const relationTopics = Array.isArray(video.video_category_assignments)
-    ? dedupeTopics(
-        video.video_category_assignments
-          .map(topicFromVideoCategoryAssignment)
-          .filter((topic): topic is TopicType => Boolean(topic)),
-      )
-    : [];
+  const topic = topicFromVideoCategory(video.category, video.subcategory);
 
   return {
     ...(video as unknown as VideoType),
-    topics: relationTopics,
+    category: normalizeName(video.category) || null,
+    subcategory: normalizeName(video.subcategory) || null,
+    topics: topic ? [topic] : [],
   };
 }
 
@@ -244,18 +204,32 @@ export function normalizeVideoRows(rows: unknown[] | null | undefined) {
 
 export function getVideoTopicNames(video: {
   topics?: TopicType[] | null;
+  category?: unknown;
+  subcategory?: unknown;
 }) {
-  return Array.isArray(video.topics)
+  const relationTopics = Array.isArray(video.topics)
     ? video.topics
         .map(getTopicDisplayName)
         .filter((topic) => topic.length > 0)
     : [];
+
+  if (relationTopics.length > 0) return relationTopics;
+
+  const topic = topicFromVideoCategory(video.category, video.subcategory);
+  return topic ? [getTopicDisplayName(topic)] : [];
 }
 
 export function getVideoTopics(video: {
   topics?: TopicType[] | null;
+  category?: unknown;
+  subcategory?: unknown;
 }) {
-  return Array.isArray(video.topics) ? video.topics : [];
+  if (Array.isArray(video.topics) && video.topics.length > 0) {
+    return video.topics;
+  }
+
+  const topic = topicFromVideoCategory(video.category, video.subcategory);
+  return topic ? [topic] : [];
 }
 
 export function getTopicDisplayName(topic: {
@@ -268,6 +242,25 @@ export function getTopicDisplayName(topic: {
   return categoryName ? `${categoryName} > ${name}` : name;
 }
 
+export function buildTopicInput(
+  categoryName: string | null,
+  subcategoryName: string | null,
+): TopicInput {
+  const category = categoryName?.trim() || null;
+  const subcategory = subcategoryName?.trim() || null;
+  const label = category
+    ? subcategory
+      ? `${category} > ${subcategory}`
+      : category
+    : subcategory;
+
+  return {
+    categoryName: category,
+    subcategoryName: subcategory,
+    label,
+  };
+}
+
 export function parseTopicInput(rawTopic: string): TopicInput | null {
   const parts = rawTopic
     .split(/\s*(?:>|›|->)\s*/u)
@@ -275,13 +268,12 @@ export function parseTopicInput(rawTopic: string): TopicInput | null {
     .filter(Boolean);
 
   if (parts.length === 0) return null;
+  if (parts.length === 1) return buildTopicInput(parts[0], null);
 
-  const name = parts[parts.length - 1];
-  const parentName =
-    parts.length > 1 ? parts.slice(0, parts.length - 1).join(" > ") : null;
-  const label = parentName ? `${parentName} > ${name}` : name;
-
-  return { name, parentName, label };
+  return buildTopicInput(
+    parts.slice(0, parts.length - 1).join(" > "),
+    parts[parts.length - 1],
+  );
 }
 
 export function parseTopicInputs(raw: unknown): TopicInput[] {
@@ -290,7 +282,7 @@ export function parseTopicInputs(raw: unknown): TopicInput[] {
 
   for (const topic of parseTopics(raw)) {
     const parsed = parseTopicInput(topic);
-    if (!parsed) continue;
+    if (!parsed?.label) continue;
 
     const key = parsed.label.toLocaleLowerCase("de");
     if (seen.has(key)) continue;
@@ -299,16 +291,18 @@ export function parseTopicInputs(raw: unknown): TopicInput[] {
     inputs.push(parsed);
   }
 
-  const parentNamesWithChildren = new Set(
+  const categoriesWithSubcategories = new Set(
     inputs
-      .map((input) => input.parentName)
-      .filter((parentName): parentName is string => Boolean(parentName))
-      .map((parentName) => parentName.toLocaleLowerCase("de")),
+      .filter((input) => input.categoryName && input.subcategoryName)
+      .map((input) => input.categoryName?.toLocaleLowerCase("de")),
   );
 
   return inputs.filter((input) => {
-    if (input.parentName) return true;
-    return !parentNamesWithChildren.has(input.name.toLocaleLowerCase("de"));
+    if (input.subcategoryName) return true;
+    if (!input.categoryName) return false;
+    return !categoriesWithSubcategories.has(
+      input.categoryName.toLocaleLowerCase("de"),
+    );
   });
 }
 
@@ -316,11 +310,15 @@ export function matchesTopic(videoOrRawTopic: unknown, topic: string): boolean {
   if (
     videoOrRawTopic &&
     typeof videoOrRawTopic === "object" &&
-    "topics" in videoOrRawTopic
+    ("topics" in videoOrRawTopic ||
+      "category" in videoOrRawTopic ||
+      "subcategory" in videoOrRawTopic)
   ) {
     return getVideoTopicNames(
       videoOrRawTopic as {
         topics?: TopicType[] | null;
+        category?: unknown;
+        subcategory?: unknown;
       },
     ).includes(topic);
   }
