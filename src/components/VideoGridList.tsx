@@ -78,6 +78,30 @@ export default function VideoGridList({
   const { t } = useTranslation();
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme];
+  const categoryHeaderColor =
+    colorScheme === "dark"
+      ? "rgba(255,255,255,0.045)"
+      : "rgba(255,255,255,0.72)";
+  const categoryBorderColor =
+    colorScheme === "dark"
+      ? "rgba(255,255,255,0.10)"
+      : "rgba(17,24,28,0.08)";
+  const controlSurfaceColor =
+    colorScheme === "dark"
+      ? "rgba(255,255,255,0.07)"
+      : "rgba(17,24,28,0.045)";
+  const primarySoftColor =
+    colorScheme === "dark"
+      ? "rgba(46,168,83,0.18)"
+      : "rgba(46,168,83,0.11)";
+  const subtopicHeaderColor =
+    colorScheme === "dark"
+      ? "rgba(255,255,255,0.032)"
+      : "rgba(255,255,255,0.50)";
+  const subtopicCountColor =
+    colorScheme === "dark"
+      ? "rgba(46,168,83,0.20)"
+      : "rgba(46,168,83,0.10)";
   const [collapsedTopicGroups, setCollapsedTopicGroups] = useState<Set<string>>(
     () => new Set(),
   );
@@ -398,6 +422,12 @@ export default function VideoGridList({
           style={[
             styles.subtopicSection,
             hideTitle && styles.subtopicSectionWithoutTitle,
+            !hideTitle && styles.subtopicSectionIndented,
+            !hideTitle && rtl && styles.subtopicSectionIndentedRtl,
+            !hideTitle &&
+              (rtl
+                ? { borderRightColor: categoryBorderColor }
+                : { borderLeftColor: categoryBorderColor }),
           ]}
         >
           {!hideTitle ? (
@@ -405,6 +435,10 @@ export default function VideoGridList({
               style={[
                 styles.subtopicHeader,
                 rtl && styles.topicHeaderReverse,
+                {
+                  backgroundColor: subtopicHeaderColor,
+                  borderColor: categoryBorderColor,
+                },
               ]}
             >
               <Pressable
@@ -413,14 +447,33 @@ export default function VideoGridList({
                 }
                 hitSlop={8}
                 onPress={() => toggleTopicSection(section.key)}
-                style={styles.chevronButton}
+                style={[
+                  styles.chevronButton,
+                  {
+                    backgroundColor: controlSurfaceColor,
+                    borderColor: categoryBorderColor,
+                  },
+                ]}
               >
                 <Ionicons
-                  name={isCollapsed ? "chevron-forward" : "chevron-down"}
+                  name={
+                    isCollapsed
+                      ? rtl
+                        ? "chevron-back"
+                        : "chevron-forward"
+                      : "chevron-down"
+                  }
                   size={16}
                   color={colors.tabIconDefault}
                 />
               </Pressable>
+
+              <View
+                style={[
+                  styles.subtopicMarker,
+                  { backgroundColor: Colors.universal.primary },
+                ]}
+              />
 
               <Pressable
                 disabled={section.isUncategorized}
@@ -452,7 +505,10 @@ export default function VideoGridList({
               <Text
                 style={[
                   styles.subtopicCount,
-                  { color: colors.tabIconDefault },
+                  {
+                    backgroundColor: subtopicCountColor,
+                    color: Colors.universal.primary,
+                  },
                   rtl && { textAlign: "left" },
                 ]}
                 numberOfLines={1}
@@ -485,12 +541,16 @@ export default function VideoGridList({
     },
     [
       collapsedTopicSections,
+      categoryBorderColor,
+      controlSurfaceColor,
       colors.tabIconDefault,
       colors.text,
       getTopicItemLayout,
       handleTopicTitlePress,
       renderVideo,
       rtl,
+      subtopicCountColor,
+      subtopicHeaderColor,
       toggleTopicSection,
     ],
   );
@@ -514,6 +574,10 @@ export default function VideoGridList({
               styles.topicHeader,
               IS_WEB && styles.webTopicHeader,
               rtl && styles.topicHeaderReverse,
+              {
+                backgroundColor: categoryHeaderColor,
+                borderColor: categoryBorderColor,
+              },
             ]}
           >
             <View
@@ -538,14 +602,40 @@ export default function VideoGridList({
                 disabled={group.isUncategorized}
                 hitSlop={8}
                 onPress={() => toggleTopicGroup(group.key)}
-                style={styles.chevronButton}
+                style={[
+                  styles.chevronButton,
+                  {
+                    backgroundColor: controlSurfaceColor,
+                    borderColor: categoryBorderColor,
+                  },
+                ]}
               >
                 <Ionicons
-                  name={isGroupCollapsed ? "chevron-forward" : "chevron-down"}
+                  name={
+                    isGroupCollapsed
+                      ? rtl
+                        ? "chevron-back"
+                        : "chevron-forward"
+                      : "chevron-down"
+                  }
                   size={18}
                   color={colors.tabIconDefault}
                 />
               </Pressable>
+
+              <View
+                style={[
+                  styles.topicIconTile,
+                  IS_WEB && styles.webTopicIconTile,
+                  { backgroundColor: primarySoftColor },
+                ]}
+              >
+                <Ionicons
+                  name={hasSubtopicRows ? "folder-open-outline" : "albums-outline"}
+                  size={IS_WEB ? 14 : 15}
+                  color={Colors.universal.primary}
+                />
+              </View>
 
               <Pressable
                 disabled={group.isUncategorized}
@@ -579,10 +669,15 @@ export default function VideoGridList({
             <Text
               style={[
                 styles.topicCount,
-                { color: IS_WEB ? colors.text : colors.tabIconDefault },
+                {
+                  backgroundColor:
+                    colorScheme === "dark" ? controlSurfaceColor : colors.contrast,
+                  color:
+                    colorScheme === "dark"
+                      ? colors.text
+                      : Colors.universal.primary,
+                },
                 !IS_WEB && { textAlign: rtl ? "left" : "right" },
-                IS_WEB && styles.webTopicCountPill,
-                IS_WEB && { backgroundColor: colors.backgroundElement },
               ]}
               numberOfLines={1}
             >
@@ -606,9 +701,14 @@ export default function VideoGridList({
     },
     [
       collapsedTopicGroups,
-      colors.backgroundElement,
+      categoryBorderColor,
+      categoryHeaderColor,
+      colorScheme,
+      colors.contrast,
       colors.tabIconDefault,
       colors.text,
+      controlSurfaceColor,
+      primarySoftColor,
       rtl,
       handleTopicTitlePress,
       renderSectionRow,
@@ -687,9 +787,13 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     gap: 12,
+    paddingHorizontal: IS_WEB ? 10 : 12,
+    paddingVertical: IS_WEB ? 7 : 9,
+    borderRadius: 8,
+    borderWidth: StyleSheet.hairlineWidth,
   },
   webTopicHeader: {
-    minHeight: 28,
+    minHeight: 38,
     marginBottom: 10,
   },
   topicHeaderReverse: {
@@ -708,6 +812,7 @@ const styles = StyleSheet.create({
     width: 28,
     height: 28,
     borderRadius: 8,
+    borderWidth: StyleSheet.hairlineWidth,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -715,6 +820,17 @@ const styles = StyleSheet.create({
     width: 4,
     height: 17,
     borderRadius: 2,
+  },
+  topicIconTile: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  webTopicIconTile: {
+    width: 26,
+    height: 26,
   },
   topicTitle: {
     flex: 1,
@@ -730,9 +846,14 @@ const styles = StyleSheet.create({
   },
   topicCount: {
     minWidth: 28,
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: 999,
+    overflow: "hidden",
     fontSize: 12,
     lineHeight: 16,
     fontWeight: "800",
+    textAlign: "center",
   },
   webTopicCountPill: {
     minWidth: 26,
@@ -765,13 +886,35 @@ const styles = StyleSheet.create({
   subtopicSectionWithoutTitle: {
     marginBottom: 0,
   },
+  subtopicSectionIndented: {
+    marginLeft: IS_WEB ? 12 : 6,
+    paddingLeft: IS_WEB ? 14 : 10,
+    borderLeftWidth: StyleSheet.hairlineWidth,
+  },
+  subtopicSectionIndentedRtl: {
+    marginLeft: 0,
+    marginRight: IS_WEB ? 12 : 6,
+    paddingLeft: 0,
+    paddingRight: IS_WEB ? 14 : 10,
+    borderLeftWidth: 0,
+    borderRightWidth: StyleSheet.hairlineWidth,
+  },
   subtopicHeader: {
-    minHeight: 24,
+    minHeight: 34,
     marginBottom: 8,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    gap: 10,
+    gap: 8,
+    paddingHorizontal: IS_WEB ? 8 : 10,
+    paddingVertical: IS_WEB ? 5 : 7,
+    borderRadius: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  subtopicMarker: {
+    width: 3,
+    height: 18,
+    borderRadius: 2,
   },
   subtopicTitle: {
     flex: 1,
@@ -783,10 +926,14 @@ const styles = StyleSheet.create({
   },
   subtopicCount: {
     minWidth: 24,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 999,
+    overflow: "hidden",
     fontSize: 11,
     lineHeight: 15,
     fontWeight: "800",
-    textAlign: "right",
+    textAlign: "center",
   },
   rowContent: {
     paddingTop: 2,
