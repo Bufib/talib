@@ -39,11 +39,15 @@ export type UseGradientOptionsType = {
 export type TopicCategoryType = {
   id: number;
   name: string;
+  sort_order_categories: number | null;
+  color_hex_categories: string | null;
 };
 
 export type TopicSubcategoryType = {
   id: number;
   name: string;
+  sort_order_subcategories: number | null;
+  color_hex_subcategories: string | null;
 };
 
 export type TopicType = {
@@ -52,6 +56,8 @@ export type TopicType = {
   name: string;
   category_id: number | null;
   subcategory_id: number | null;
+  sort_order: number | null;
+  color_hex?: string | null;
   category?: TopicCategoryType | null;
 };
 

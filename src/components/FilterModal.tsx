@@ -20,6 +20,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLanguage } from "../../contexts/LanguageContext";
 import { useVideoFilterStore } from "../../stores/videoFilterStore";
 import { getLanguageLabel } from "../../utils/languageLabel";
+import { compareTopicNamesByOrder } from "../../utils/videoTopics";
 
 const IS_WEB = Platform.OS === "web";
 const COMPACT_WEB_BREAKPOINT = 480;
@@ -76,6 +77,7 @@ export default function FilterModal() {
     availableTopics,
     availableAuthors,
     availableLanguages,
+    topicSortOrders,
     isLoading,
   } = useVideoFilters({
     language: selectedLanguage,
@@ -126,7 +128,12 @@ export default function FilterModal() {
           return a.isDirectRoot ? -1 : 1;
         }
 
-        return a.label.localeCompare(b.label, lang);
+        return compareTopicNamesByOrder(
+          a.label,
+          b.label,
+          topicSortOrders.subcategories,
+          lang,
+        );
       });
 
     return [...groupsByParent.values()]
@@ -137,8 +144,15 @@ export default function FilterModal() {
           : null,
         topics: sortTopicItems(group.topics),
       }))
-      .sort((a, b) => (a.title ?? "").localeCompare(b.title ?? "", lang));
-  }, [availableTopics, lang]);
+      .sort((a, b) =>
+        compareTopicNamesByOrder(
+          a.title ?? a.key,
+          b.title ?? b.key,
+          topicSortOrders.categories,
+          lang,
+        ),
+      );
+  }, [availableTopics, lang, topicSortOrders]);
 
   const panelBg = isDark ? "#1e2a3a" : "#ffffff";
   const sectionLabelColor = isDark ? "#8899aa" : "#888";

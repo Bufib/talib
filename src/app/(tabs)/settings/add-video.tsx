@@ -31,6 +31,7 @@ import { supabase } from "../../../../utils/supabase";
 import {
   buildTopicInput,
   CATEGORY_SELECT,
+  compareBySortOrderThenName,
   getVideoTopicNames,
   getVideoTopics,
   getTopicDisplayName,
@@ -50,6 +51,8 @@ type SharedFieldKey =
   | "languageCode"
   | "categoryName"
   | "subcategoryName"
+  | "categoryColorHex"
+  | "subcategoryColorHex"
   | "startTime"
   | "endTime";
 
@@ -96,6 +99,9 @@ type TopicRow = {
   parentName: string | null;
   topic: string;
   count: number;
+  sortOrder: number | null;
+  categorySortOrder: number | null;
+  colorHex: string | null;
 };
 
 type Feedback = {
@@ -142,6 +148,8 @@ const initialSharedValues: SharedValues = {
   languageCode: "",
   categoryName: "",
   subcategoryName: "",
+  categoryColorHex: "",
+  subcategoryColorHex: "",
   startTime: "",
   endTime: "",
 };
@@ -151,6 +159,8 @@ const initialSharedFields: SharedFieldState = {
   languageCode: true,
   categoryName: true,
   subcategoryName: true,
+  categoryColorHex: true,
+  subcategoryColorHex: true,
   startTime: false,
   endTime: false,
 };
@@ -195,6 +205,20 @@ const sharedFieldDefinitions: FieldDefinition<SharedFieldKey>[] = [
     key: "subcategoryName",
     label: "Unterkategorie",
     placeholder: "Optional, z.B. Gebet",
+  },
+  {
+    key: "categoryColorHex",
+    label: "Oberkategorie-Farbe",
+    placeholder: "Optional, z.B. #2EA853",
+    autoCapitalize: "none",
+    autoCorrect: false,
+  },
+  {
+    key: "subcategoryColorHex",
+    label: "Unterkategorie-Farbe",
+    placeholder: "Optional, z.B. #0EA5E9",
+    autoCapitalize: "none",
+    autoCorrect: false,
   },
   {
     key: "startTime",
@@ -243,6 +267,8 @@ function createVideoDraft(video: ManagedVideo): VideoDraft {
     languageCode: video.language_code ?? "",
     categoryName: video.category ?? "",
     subcategoryName: video.subcategory ?? "",
+    categoryColorHex: "",
+    subcategoryColorHex: "",
     startTime: video.start_time == null ? "" : String(video.start_time),
     endTime: video.end_time == null ? "" : String(video.end_time),
   };
@@ -251,6 +277,23 @@ function createVideoDraft(video: ManagedVideo): VideoDraft {
 function optionalText(value: string) {
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
+}
+
+function normalizeOptionalHexColor(value: string, label: string) {
+  const rawColor = optionalText(value);
+  if (!rawColor) return null;
+
+  const color = rawColor.startsWith("#") ? rawColor.slice(1) : rawColor;
+  if (/^[0-9a-f]{3}$/i.test(color)) {
+    const [red, green, blue] = color;
+    return `#${red}${red}${green}${green}${blue}${blue}`.toUpperCase();
+  }
+
+  if (/^[0-9a-f]{6}$/i.test(color)) {
+    return `#${color}`.toUpperCase();
+  }
+
+  throw new Error(`${label} muss ein Hex-Code sein, z.B. #2EA853.`);
 }
 
 function parseOptionalTime(value: string, label: string) {
@@ -345,7 +388,19 @@ function buildVideoPayloadFromDraft(
   const languageCode = optionalText(draft.languageCode)?.toLowerCase() ?? null;
   const categoryName = optionalText(draft.categoryName);
   const subcategoryName = optionalText(draft.subcategoryName);
-  const topicInput = buildTopicInput(categoryName, subcategoryName);
+  const categoryColorHex = normalizeOptionalHexColor(
+    draft.categoryColorHex,
+    `${rowLabel} Oberkategorie-Farbe`,
+  );
+  const subcategoryColorHex = normalizeOptionalHexColor(
+    draft.subcategoryColorHex,
+    `${rowLabel} Unterkategorie-Farbe`,
+  );
+  const topicInput = {
+    ...buildTopicInput(categoryName, subcategoryName),
+    categoryColorHex: categoryColorHex ?? undefined,
+    subcategoryColorHex: subcategoryColorHex ?? undefined,
+  };
 
   if (!title || !youtubeUrl) {
     throw new Error(`${rowLabel}: Titel und YouTube URL sind Pflicht.`);
@@ -354,6 +409,18 @@ function buildVideoPayloadFromDraft(
   if (subcategoryName && !categoryName) {
     throw new Error(
       `${rowLabel}: Für eine Unterkategorie muss eine Oberkategorie gesetzt sein.`,
+    );
+  }
+
+  if (categoryColorHex && !categoryName) {
+    throw new Error(
+      `${rowLabel}: Für eine Oberkategorie-Farbe muss eine Oberkategorie gesetzt sein.`,
+    );
+  }
+
+  if (subcategoryColorHex && !subcategoryName) {
+    throw new Error(
+      `${rowLabel}: Für eine Unterkategorie-Farbe muss eine Unterkategorie gesetzt sein.`,
     );
   }
 
@@ -411,6 +478,14 @@ function normalizeTopicInputs(topicInputs: TopicInput[]) {
     const categoryName = input.categoryName?.trim() || null;
     const subcategoryName = input.subcategoryName?.trim() || null;
     const label = input.label?.trim() || null;
+    const categoryColorHex =
+      input.categoryColorHex === undefined
+        ? undefined
+        : input.categoryColorHex;
+    const subcategoryColorHex =
+      input.subcategoryColorHex === undefined
+        ? undefined
+        : input.subcategoryColorHex;
 
     if (!label) continue;
     if (subcategoryName && !categoryName) {
@@ -422,7 +497,13 @@ function normalizeTopicInputs(topicInputs: TopicInput[]) {
     const key = label.toLocaleLowerCase("de");
     if (seen.has(key)) continue;
     seen.add(key);
-    normalizedInputs.push({ categoryName, subcategoryName, label });
+    normalizedInputs.push({
+      categoryName,
+      subcategoryName,
+      label,
+      categoryColorHex,
+      subcategoryColorHex,
+    });
   }
 
   const parentNamesWithChildren = new Set(
@@ -444,32 +525,51 @@ async function ensureTopicsExist(topicInputs: TopicInput[]) {
   const normalizedInputs = normalizeTopicInputs(topicInputs);
   if (normalizedInputs.length === 0) return [];
 
-  const categoryNames = [
-    ...new Set(
-      normalizedInputs
-        .map((input) => input.categoryName)
-        .filter((name): name is string => Boolean(name)),
-    ),
-  ];
-  const subcategoryNames = [
-    ...new Set(
-      normalizedInputs
-        .map((input) => input.subcategoryName)
-        .filter((name): name is string => Boolean(name)),
-    ),
-  ];
+  const categoryRowsByName = new Map<
+    string,
+    { name: string; color_hex_categories?: string | null }
+  >();
+  const subcategoryRowsByName = new Map<
+    string,
+    { name: string; color_hex_subcategories?: string | null }
+  >();
 
-  if (categoryNames.length > 0) {
+  for (const input of normalizedInputs) {
+    if (input.categoryName) {
+      const row = categoryRowsByName.get(input.categoryName) ?? {
+        name: input.categoryName,
+      };
+      if (input.categoryColorHex !== undefined) {
+        row.color_hex_categories = input.categoryColorHex;
+      }
+      categoryRowsByName.set(input.categoryName, row);
+    }
+
+    if (input.subcategoryName) {
+      const row = subcategoryRowsByName.get(input.subcategoryName) ?? {
+        name: input.subcategoryName,
+      };
+      if (input.subcategoryColorHex !== undefined) {
+        row.color_hex_subcategories = input.subcategoryColorHex;
+      }
+      subcategoryRowsByName.set(input.subcategoryName, row);
+    }
+  }
+
+  const categoryRows = [...categoryRowsByName.values()];
+  const subcategoryRows = [...subcategoryRowsByName.values()];
+
+  if (categoryRows.length > 0) {
     const { error } = await supabase.from("topic_categories").upsert(
-      categoryNames.map((name) => ({ name })),
+      categoryRows,
       { onConflict: "name" },
     );
     if (error) throw error;
   }
 
-  if (subcategoryNames.length > 0) {
+  if (subcategoryRows.length > 0) {
     const { error } = await supabase.from("topic_subcategories").upsert(
-      subcategoryNames.map((name) => ({ name })),
+      subcategoryRows,
       { onConflict: "name" },
     );
     if (error) throw error;
@@ -588,8 +688,10 @@ export default function AddVideo() {
   const [selectedTopic, setSelectedTopic] = useState<string | null>(null);
   const [topicDraftName, setTopicDraftName] = useState("");
   const [topicParentDraftName, setTopicParentDraftName] = useState("");
+  const [topicDraftColorHex, setTopicDraftColorHex] = useState("");
   const [newTopicName, setNewTopicName] = useState("");
   const [newTopicParentName, setNewTopicParentName] = useState("");
+  const [newTopicColorHex, setNewTopicColorHex] = useState("");
 
   const colors = Colors[colorScheme];
   const borderColor =
@@ -608,6 +710,7 @@ export default function AddVideo() {
       queryClient.invalidateQueries({ queryKey: ["videos"] }),
       queryClient.invalidateQueries({ queryKey: ["video_filter_pairs"] }),
       queryClient.invalidateQueries({ queryKey: ["video_languages"] }),
+      queryClient.invalidateQueries({ queryKey: ["topic_sort_orders"] }),
     ]);
   }, [queryClient]);
 
@@ -731,8 +834,19 @@ export default function AddVideo() {
     const rows = new Map<string, TopicRow>();
     const categoryIdsByName = new Map<string, number>();
     const subcategoryIdsByName = new Map<string, number>();
+    const categorySortOrdersByName = new Map<string, number | null>();
+    const subcategorySortOrdersByName = new Map<string, number | null>();
+    const categoryColorsByName = new Map<string, string | null>();
+    const subcategoryColorsByName = new Map<string, string | null>();
 
     for (const topic of topicCatalog) {
+      const categorySortOrder =
+        topic.category?.sort_order_categories ?? topic.sort_order ?? null;
+      const subcategorySortOrder = topic.subcategory_id
+        ? topic.sort_order
+        : null;
+      const colorHex =
+        topic.color_hex ?? topic.category?.color_hex_categories ?? null;
       const displayName = getTopicDisplayName(topic);
       rows.set(topic.key, {
         id: topic.id,
@@ -742,12 +856,19 @@ export default function AddVideo() {
         parentName: topic.category?.name ?? null,
         topic: displayName,
         count: 0,
+        sortOrder: topic.sort_order,
+        categorySortOrder,
+        colorHex,
       });
 
       if (topic.subcategory_id) {
         subcategoryIdsByName.set(topic.name, topic.subcategory_id);
+        subcategorySortOrdersByName.set(topic.name, subcategorySortOrder);
+        subcategoryColorsByName.set(topic.name, colorHex);
       } else {
         categoryIdsByName.set(topic.name, topic.category_id ?? topic.id);
+        categorySortOrdersByName.set(topic.name, topic.sort_order);
+        categoryColorsByName.set(topic.name, colorHex);
       }
     }
 
@@ -757,6 +878,16 @@ export default function AddVideo() {
         const key = topic.key || `topic:${displayName}`;
         const existing = rows.get(key);
         const categoryName = topic.category?.name ?? topic.name;
+        const topicSortOrder = topic.category
+          ? subcategorySortOrdersByName.get(topic.name) ?? topic.sort_order ?? null
+          : categorySortOrdersByName.get(topic.name) ?? topic.sort_order ?? null;
+        const categorySortOrder =
+          categorySortOrdersByName.get(categoryName) ??
+          topic.category?.sort_order_categories ??
+          topicSortOrder;
+        const colorHex = topic.category
+          ? subcategoryColorsByName.get(topic.name) ?? topic.color_hex ?? null
+          : categoryColorsByName.get(topic.name) ?? topic.color_hex ?? null;
         rows.set(key, {
           id:
             existing?.id && existing.id > 0
@@ -775,13 +906,34 @@ export default function AddVideo() {
           parentName: existing?.parentName ?? topic.category?.name ?? null,
           topic: existing?.topic ?? displayName,
           count: (existing?.count ?? 0) + 1,
+          sortOrder: existing?.sortOrder ?? topicSortOrder,
+          categorySortOrder: existing?.categorySortOrder ?? categorySortOrder,
+          colorHex: existing?.colorHex ?? colorHex,
         });
       }
     }
 
-    return [...rows.values()].sort((a, b) =>
-      a.topic.localeCompare(b.topic, "de"),
-    );
+    return [...rows.values()].sort((a, b) => {
+      const aCategoryName = a.parentName ?? a.name;
+      const bCategoryName = b.parentName ?? b.name;
+      const categoryComparison = compareBySortOrderThenName(
+        { name: aCategoryName, sortOrder: a.categorySortOrder },
+        { name: bCategoryName, sortOrder: b.categorySortOrder },
+        "de",
+      );
+
+      if (categoryComparison !== 0) return categoryComparison;
+
+      if (a.parentName !== b.parentName) {
+        return a.parentName ? 1 : -1;
+      }
+
+      return compareBySortOrderThenName(
+        { name: a.name, sortOrder: a.sortOrder },
+        { name: b.name, sortOrder: b.sortOrder },
+        "de",
+      );
+    });
   }, [managedVideos, topicCatalog]);
 
   useEffect(() => {
@@ -794,6 +946,7 @@ export default function AddVideo() {
       setSelectedTopic(null);
       setTopicDraftName("");
       setTopicParentDraftName("");
+      setTopicDraftColorHex("");
     }
   }, [managementLoaded, selectedTopic, topicRows]);
 
@@ -905,6 +1058,8 @@ export default function AddVideo() {
           languageCode: getResolvedValue(video, "languageCode"),
           categoryName: getResolvedValue(video, "categoryName"),
           subcategoryName: getResolvedValue(video, "subcategoryName"),
+          categoryColorHex: getResolvedValue(video, "categoryColorHex"),
+          subcategoryColorHex: getResolvedValue(video, "subcategoryColorHex"),
           startTime: getResolvedValue(video, "startTime"),
           endTime: getResolvedValue(video, "endTime"),
         },
@@ -1293,11 +1448,30 @@ export default function AddVideo() {
     }
   };
 
-  const startEditVideo = (video: ManagedVideo) => {
+  const startEditVideo = useCallback((video: ManagedVideo) => {
+    const categoryRow = video.category
+      ? topicRows.find(
+          (topicRow) =>
+            !topicRow.parentName && topicRow.name === video.category,
+        )
+      : null;
+    const subcategoryRow =
+      video.category && video.subcategory
+        ? topicRows.find(
+            (topicRow) =>
+              topicRow.parentName === video.category &&
+              topicRow.name === video.subcategory,
+          )
+        : null;
+
     setEditingVideoId(video.id);
-    setVideoDraft(createVideoDraft(video));
+    setVideoDraft({
+      ...createVideoDraft(video),
+      categoryColorHex: categoryRow?.colorHex ?? "",
+      subcategoryColorHex: subcategoryRow?.colorHex ?? "",
+    });
     setManagementFeedback(null);
-  };
+  }, [topicRows]);
 
   const cancelEditVideo = () => {
     setEditingVideoId(null);
@@ -1327,6 +1501,7 @@ export default function AddVideo() {
       setSelectedTopic(null);
       setTopicDraftName("");
       setTopicParentDraftName("");
+      setTopicDraftColorHex("");
       setManagementSearch(String(video.id));
       startEditVideo(video);
       handledShortcutRef.current = shortcutKey;
@@ -1340,6 +1515,7 @@ export default function AddVideo() {
       setSelectedTopic(requestedTopic);
       setTopicDraftName(topicRow?.name ?? requestedTopic);
       setTopicParentDraftName(topicRow?.parentName ?? "");
+      setTopicDraftColorHex(topicRow?.colorHex ?? "");
       setManagementSearch("");
       handledShortcutRef.current = shortcutKey;
     }
@@ -1350,6 +1526,7 @@ export default function AddVideo() {
     requestedEditVideoId,
     requestedTopic,
     shortcutKey,
+    startEditVideo,
     topicRows,
   ]);
 
@@ -1463,6 +1640,7 @@ export default function AddVideo() {
     setSelectedTopic(topic);
     setTopicDraftName(topicRow?.name ?? topic);
     setTopicParentDraftName(topicRow?.parentName ?? "");
+    setTopicDraftColorHex(topicRow?.colorHex ?? "");
     setManagementFeedback(null);
   };
 
@@ -1488,21 +1666,47 @@ export default function AddVideo() {
           parsedTopic.subcategoryName ?? parsedTopic.categoryName,
         )
       : parsedTopic;
+    let colorHex: string | null;
+    try {
+      colorHex = normalizeOptionalHexColor(
+        newTopicColorHex,
+        "Kategorie-Farbe",
+      );
+    } catch (error) {
+      setManagementFeedback({
+        type: "error",
+        message: getErrorMessage(error, "Die Farbe ist ungültig."),
+      });
+      return;
+    }
 
     if (!topicInput.label) return;
+
+    const topicInputWithColor: TopicInput = {
+      ...topicInput,
+      categoryColorHex:
+        topicInput.categoryName && !topicInput.subcategoryName
+          ? colorHex ?? undefined
+          : undefined,
+      subcategoryColorHex: topicInput.subcategoryName
+        ? colorHex ?? undefined
+        : undefined,
+    };
 
     setIsManagementSaving(true);
     setManagementFeedback(null);
 
     try {
-      await ensureTopicsExist([topicInput]);
+      await ensureTopicsExist([topicInputWithColor]);
       await invalidateVideoCaches();
       await loadManagementData();
 
       setNewTopicName("");
       setNewTopicParentName("");
+      setNewTopicColorHex("");
       setSelectedTopic(topicInput.label);
       setTopicDraftName(topicInput.subcategoryName ?? topicInput.categoryName ?? "");
+      setTopicDraftColorHex(colorHex ?? "");
       setTopicParentDraftName(topicInput.categoryName && topicInput.subcategoryName
         ? topicInput.categoryName
         : "");
@@ -1569,6 +1773,20 @@ export default function AddVideo() {
       return;
     }
 
+    let nextTopicColorHex: string | null;
+    try {
+      nextTopicColorHex = normalizeOptionalHexColor(
+        topicDraftColorHex,
+        "Kategorie-Farbe",
+      );
+    } catch (error) {
+      setManagementFeedback({
+        type: "error",
+        message: getErrorMessage(error, "Die Farbe ist ungültig."),
+      });
+      return;
+    }
+
     const affectedCount = currentTopicRow?.count ?? 0;
     const nextTopicLabel = nextParentTopic
       ? `${nextParentTopic} > ${nextTopic}`
@@ -1582,12 +1800,24 @@ export default function AddVideo() {
         nextParentTopic ?? nextTopic,
         nextParentTopic ? nextTopic : null,
       );
-      await ensureTopicsExist(targetInput.label ? [targetInput] : []);
+      await ensureTopicsExist(
+        targetInput.label
+          ? [
+              {
+                ...targetInput,
+                categoryColorHex: nextParentTopic ? undefined : nextTopicColorHex,
+                subcategoryColorHex: nextParentTopic
+                  ? nextTopicColorHex
+                  : undefined,
+              },
+            ]
+          : [],
+      );
 
       if (!currentTopicRow.parentName && !nextParentTopic) {
         const { error } = await supabase
           .from("topic_categories")
-          .update({ name: nextTopic })
+          .update({ name: nextTopic, color_hex_categories: nextTopicColorHex })
           .eq(
             currentTopicRow.categoryId ? "id" : "name",
             currentTopicRow.categoryId ?? currentTopicRow.name,
@@ -1619,7 +1849,10 @@ export default function AddVideo() {
         if (currentTopicRow.parentName && currentTopicRow.subcategoryId) {
           const { error: subcategoryError } = await supabase
             .from("topic_subcategories")
-            .update({ name: nextTopic })
+            .update({
+              name: nextTopic,
+              color_hex_subcategories: nextTopicColorHex,
+            })
             .eq("id", currentTopicRow.subcategoryId);
 
           if (subcategoryError && !isUniqueConstraintError(subcategoryError)) {
@@ -1634,6 +1867,7 @@ export default function AddVideo() {
       setSelectedTopic(nextTopicLabel);
       setTopicDraftName(nextTopic);
       setTopicParentDraftName(nextParentTopic ?? "");
+      setTopicDraftColorHex(nextTopicColorHex ?? "");
       setManagementFeedback({
         type: "success",
         message: `"${currentTopic}" wurde in ${affectedCount} Video${
@@ -2398,6 +2632,24 @@ export default function AddVideo() {
                             },
                           ]}
                         />
+                        <TextInput
+                          value={newTopicColorHex}
+                          onChangeText={setNewTopicColorHex}
+                          placeholder="Farbe optional, z.B. #2EA853"
+                          placeholderTextColor={Colors.universal.grayedOut}
+                          editable={!operationDisabled}
+                          autoCapitalize="none"
+                          autoCorrect={false}
+                          style={[
+                            styles.input,
+                            styles.inlineInput,
+                            {
+                              backgroundColor: inputBackground,
+                              borderColor,
+                              color: colors.text,
+                            },
+                          ]}
+                        />
                         {renderSmallButton("Hinzufügen", () => void handleAddTopic(), {
                           filled: true,
                           disabled: operationDisabled,
@@ -2475,6 +2727,24 @@ export default function AddVideo() {
                             },
                           ]}
                         />
+                        <TextInput
+                          value={topicDraftColorHex}
+                          onChangeText={setTopicDraftColorHex}
+                          placeholder="Farbe optional, z.B. #2EA853"
+                          placeholderTextColor={Colors.universal.grayedOut}
+                          editable={!operationDisabled && Boolean(selectedTopic)}
+                          autoCapitalize="none"
+                          autoCorrect={false}
+                          style={[
+                            styles.input,
+                            styles.inlineInput,
+                            {
+                              backgroundColor: inputBackground,
+                              borderColor,
+                              color: colors.text,
+                            },
+                          ]}
+                        />
                         {renderSmallButton("Speichern", () => void handleSaveTopic(), {
                           filled: true,
                           disabled: operationDisabled || !selectedTopic,
@@ -2531,6 +2801,7 @@ export default function AddVideo() {
                             setSelectedTopic(null);
                             setTopicDraftName("");
                             setTopicParentDraftName("");
+                            setTopicDraftColorHex("");
                           })}
                         </View>
                       ) : null}

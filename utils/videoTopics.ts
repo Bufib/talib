@@ -18,13 +18,31 @@ export const VIDEO_WITH_TOPICS_SELECT = `
   subcategory
 `;
 
-export const CATEGORY_SELECT = "id, name";
-export const SUBCATEGORY_SELECT = "id, name";
+export const CATEGORY_SELECT =
+  "id, name, sort_order_categories, color_hex_categories";
+export const SUBCATEGORY_SELECT =
+  "id, name, sort_order_subcategories, color_hex_subcategories";
+
+export type TopicSortOrders = {
+  categories: ReadonlyMap<string, number>;
+  subcategories: ReadonlyMap<string, number>;
+  categoryColors: ReadonlyMap<string, string>;
+  subcategoryColors: ReadonlyMap<string, string>;
+};
+
+export const EMPTY_TOPIC_SORT_ORDERS: TopicSortOrders = {
+  categories: new Map<string, number>(),
+  subcategories: new Map<string, number>(),
+  categoryColors: new Map<string, string>(),
+  subcategoryColors: new Map<string, string>(),
+};
 
 export type TopicInput = {
   categoryName: string | null;
   subcategoryName: string | null;
   label: string | null;
+  categoryColorHex?: string | null;
+  subcategoryColorHex?: string | null;
 };
 
 export function parseTopics(raw: unknown): string[] {
@@ -66,39 +84,107 @@ function normalizeName(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function normalizeSortKey(value: string) {
+  return value.trim().toLocaleLowerCase("de");
+}
+
+function normalizeSortOrder(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  return null;
+}
+
+function normalizeHexColor(value: unknown) {
+  if (typeof value !== "string") return null;
+
+  const rawColor = value.trim();
+  if (!rawColor) return null;
+
+  const color = rawColor.startsWith("#") ? rawColor.slice(1) : rawColor;
+  if (/^[0-9a-f]{3}$/i.test(color)) {
+    const [red, green, blue] = color;
+    return `#${red}${red}${green}${green}${blue}${blue}`.toUpperCase();
+  }
+
+  if (/^[0-9a-f]{6}$/i.test(color)) {
+    return `#${color}`.toUpperCase();
+  }
+
+  return null;
+}
+
+export function hexToRgba(hexColor: string, opacity: number) {
+  const normalizedColor = normalizeHexColor(hexColor);
+  if (!normalizedColor) return hexColor;
+
+  const red = parseInt(normalizedColor.slice(1, 3), 16);
+  const green = parseInt(normalizedColor.slice(3, 5), 16);
+  const blue = parseInt(normalizedColor.slice(5, 7), 16);
+  const alpha = Math.max(0, Math.min(1, opacity));
+
+  return `rgba(${red},${green},${blue},${alpha})`;
+}
+
 function maybeCategory(value: unknown): TopicCategoryType | null {
   if (!value || typeof value !== "object") return null;
 
-  const row = value as { id?: unknown; name?: unknown };
+  const row = value as {
+    id?: unknown;
+    name?: unknown;
+    sort_order_categories?: unknown;
+    color_hex_categories?: unknown;
+  };
   const name = normalizeName(row.name);
   if (!name) return null;
 
   return {
     id: typeof row.id === "number" ? row.id : 0,
     name,
+    sort_order_categories: normalizeSortOrder(row.sort_order_categories),
+    color_hex_categories: normalizeHexColor(row.color_hex_categories),
   };
 }
 
 function maybeSubcategory(value: unknown): TopicSubcategoryType | null {
   if (!value || typeof value !== "object") return null;
 
-  const row = value as { id?: unknown; name?: unknown };
+  const row = value as {
+    id?: unknown;
+    name?: unknown;
+    sort_order_subcategories?: unknown;
+    color_hex_subcategories?: unknown;
+  };
   const name = normalizeName(row.name);
   if (!name) return null;
 
   return {
     id: typeof row.id === "number" ? row.id : 0,
     name,
+    sort_order_subcategories: normalizeSortOrder(
+      row.sort_order_subcategories,
+    ),
+    color_hex_subcategories: normalizeHexColor(row.color_hex_subcategories),
   };
 }
 
-function makeCategoryTopic(categoryName: string, categoryId = 0): TopicType {
+function makeCategoryTopic(
+  categoryName: string,
+  categoryId = 0,
+  sortOrder: number | null = null,
+  colorHex: string | null = null,
+): TopicType {
   return {
     key: `category:${categoryName.toLocaleLowerCase("de")}`,
     id: categoryId,
     name: categoryName,
     category_id: categoryId || null,
     subcategory_id: null,
+    sort_order: sortOrder,
+    color_hex: colorHex,
     category: null,
   };
 }
@@ -108,10 +194,15 @@ function makeSubcategoryTopic(
   subcategoryName: string,
   categoryId = 0,
   subcategoryId = 0,
+  categorySortOrder: number | null = null,
+  subcategorySortOrder: number | null = null,
+  categoryColorHex: string | null = null,
 ): TopicType {
   const category = {
     id: categoryId,
     name: categoryName,
+    sort_order_categories: categorySortOrder,
+    color_hex_categories: categoryColorHex,
   };
 
   return {
@@ -122,6 +213,7 @@ function makeSubcategoryTopic(
     name: subcategoryName,
     category_id: categoryId || null,
     subcategory_id: subcategoryId || null,
+    sort_order: subcategorySortOrder,
     category,
   };
 }
@@ -167,7 +259,14 @@ export function normalizeTopicRows(
   for (const row of categories ?? []) {
     const category = maybeCategory(row);
     if (!category) continue;
-    topics.push(makeCategoryTopic(category.name, category.id));
+    topics.push(
+      makeCategoryTopic(
+        category.name,
+        category.id,
+        category.sort_order_categories,
+        category.color_hex_categories,
+      ),
+    );
   }
 
   for (const row of subcategories ?? []) {
@@ -179,11 +278,159 @@ export function normalizeTopicRows(
       name: subcategory.name,
       category_id: null,
       subcategory_id: subcategory.id,
+      sort_order: subcategory.sort_order_subcategories,
+      color_hex: subcategory.color_hex_subcategories,
       category: null,
     });
   }
 
   return dedupeTopics(topics);
+}
+
+export function createTopicSortOrders(
+  categories: unknown[] | null | undefined,
+  subcategories: unknown[] | null | undefined = [],
+): TopicSortOrders {
+  const categorySortOrders = new Map<string, number>();
+  const subcategorySortOrders = new Map<string, number>();
+  const categoryColors = new Map<string, string>();
+  const subcategoryColors = new Map<string, string>();
+
+  for (const row of categories ?? []) {
+    const category = maybeCategory(row);
+    if (!category) continue;
+
+    const categoryKey = normalizeSortKey(category.name);
+    if (category.sort_order_categories !== null) {
+      categorySortOrders.set(categoryKey, category.sort_order_categories);
+    }
+    if (category.color_hex_categories) {
+      categoryColors.set(categoryKey, category.color_hex_categories);
+    }
+  }
+
+  for (const row of subcategories ?? []) {
+    const subcategory = maybeSubcategory(row);
+    if (!subcategory) continue;
+
+    const subcategoryKey = normalizeSortKey(subcategory.name);
+    if (subcategory.sort_order_subcategories !== null) {
+      subcategorySortOrders.set(
+        subcategoryKey,
+        subcategory.sort_order_subcategories,
+      );
+    }
+    if (subcategory.color_hex_subcategories) {
+      subcategoryColors.set(
+        subcategoryKey,
+        subcategory.color_hex_subcategories,
+      );
+    }
+  }
+
+  return {
+    categories: categorySortOrders,
+    subcategories: subcategorySortOrders,
+    categoryColors,
+    subcategoryColors,
+  };
+}
+
+export function getTopicSortOrder(
+  sortOrders: ReadonlyMap<string, number>,
+  name: string | null | undefined,
+) {
+  const normalizedName = name?.trim();
+  if (!normalizedName) return null;
+
+  return sortOrders.get(normalizeSortKey(normalizedName)) ?? null;
+}
+
+export function getTopicColor(
+  colors: ReadonlyMap<string, string>,
+  name: string | null | undefined,
+  fallbackColor: string,
+) {
+  const normalizedName = name?.trim();
+  if (!normalizedName) return fallbackColor;
+
+  return colors.get(normalizeSortKey(normalizedName)) ?? fallbackColor;
+}
+
+export function compareBySortOrderThenName(
+  first: { name: string; sortOrder: number | null },
+  second: { name: string; sortOrder: number | null },
+  locale: string,
+) {
+  if (first.sortOrder !== null || second.sortOrder !== null) {
+    if (first.sortOrder === null) return 1;
+    if (second.sortOrder === null) return -1;
+    if (first.sortOrder !== second.sortOrder) {
+      return first.sortOrder - second.sortOrder;
+    }
+  }
+
+  return first.name.localeCompare(second.name, locale, {
+    sensitivity: "base",
+  });
+}
+
+export function compareTopicNamesByOrder(
+  firstName: string,
+  secondName: string,
+  sortOrders: ReadonlyMap<string, number>,
+  locale: string,
+) {
+  return compareBySortOrderThenName(
+    {
+      name: firstName,
+      sortOrder: getTopicSortOrder(sortOrders, firstName),
+    },
+    {
+      name: secondName,
+      sortOrder: getTopicSortOrder(sortOrders, secondName),
+    },
+    locale,
+  );
+}
+
+export function compareTopicLabelsByOrder(
+  firstLabel: string,
+  secondLabel: string,
+  topicSortOrders: TopicSortOrders,
+  locale: string,
+) {
+  const firstParts = firstLabel
+    .split(">")
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const secondParts = secondLabel
+    .split(">")
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const firstCategory = firstParts.length > 1 ? firstParts[0] : firstLabel;
+  const secondCategory = secondParts.length > 1 ? secondParts[0] : secondLabel;
+  const categoryComparison = compareTopicNamesByOrder(
+    firstCategory,
+    secondCategory,
+    topicSortOrders.categories,
+    locale,
+  );
+
+  if (categoryComparison !== 0) return categoryComparison;
+
+  if (firstParts.length <= 1 || secondParts.length <= 1) {
+    return firstLabel.localeCompare(secondLabel, locale, {
+      sensitivity: "base",
+    });
+  }
+
+  return compareTopicNamesByOrder(
+    firstParts[firstParts.length - 1],
+    secondParts[secondParts.length - 1],
+    topicSortOrders.subcategories,
+    locale,
+  );
 }
 
 export function normalizeVideoRow(row: unknown): VideoType {

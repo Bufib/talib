@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import { VideoType } from "@/constants/Types";
@@ -8,6 +8,7 @@ import {
   normalizeVideoRows,
   VIDEO_WITH_TOPICS_SELECT,
 } from "../../utils/videoTopics";
+import { useTopicSortOrders } from "./useTopicSortOrders";
 
 type UseVideoListArgs = {
   language: string | null;
@@ -23,6 +24,7 @@ export function useVideoList({
   searchQuery = "",
 }: UseVideoListArgs) {
   const normalizedSearchQuery = searchQuery.trim().toLocaleLowerCase();
+  const topicSortOrdersQuery = useTopicSortOrders();
 
   const query = useQuery<VideoType[], Error>({
     queryKey: ["videos", "grid"],
@@ -61,8 +63,23 @@ export function useVideoList({
     selectedTopic,
   ]);
 
+  const { refetch: refetchVideos } = query;
+  const { refetch: refetchTopicSortOrders } = topicSortOrdersQuery;
+
+  const refetch = useCallback(async () => {
+    const [videosResult] = await Promise.all([
+      refetchVideos(),
+      refetchTopicSortOrders(),
+    ]);
+
+    return videosResult;
+  }, [refetchTopicSortOrders, refetchVideos]);
+
   return {
     ...query,
+    refetch,
     videos,
+    topicSortOrders: topicSortOrdersQuery.topicSortOrders,
+    isTopicSortOrdersLoading: topicSortOrdersQuery.isLoading,
   };
 }

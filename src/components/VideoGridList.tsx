@@ -4,8 +4,13 @@ import type { VideoType } from "@/constants/Types";
 import { useColorScheme } from "@/hooks/useColorScheme";
 import { useLanguage } from "../../contexts/LanguageContext";
 import {
+  compareBySortOrderThenName,
   getTopicDisplayName,
+  getTopicColor,
+  getTopicSortOrder,
   getVideoTopics,
+  hexToRgba,
+  type TopicSortOrders,
 } from "../../utils/videoTopics";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
@@ -44,6 +49,8 @@ type TopicVideoSection = {
   videos: VideoType[];
   isUncategorized: boolean;
   isDirectRoot: boolean;
+  sortOrder: number | null;
+  colorHex: string;
 };
 
 type TopicVideoGroup = {
@@ -52,6 +59,8 @@ type TopicVideoGroup = {
   sections: TopicVideoSection[];
   isUncategorized: boolean;
   videoCount: number;
+  sortOrder: number | null;
+  colorHex: string;
 };
 
 type VideoGridListProps = {
@@ -62,6 +71,7 @@ type VideoGridListProps = {
   ListEmptyComponent?: FlatListProps<VideoType>["ListEmptyComponent"];
   refreshing?: boolean;
   onRefresh?: () => void;
+  topicSortOrders?: TopicSortOrders;
 };
 
 export default function VideoGridList({
@@ -72,6 +82,7 @@ export default function VideoGridList({
   ListEmptyComponent,
   refreshing = false,
   onRefresh,
+  topicSortOrders,
 }: VideoGridListProps) {
   const { width } = useWindowDimensions();
   const { lang, rtl } = useLanguage();
@@ -90,22 +101,15 @@ export default function VideoGridList({
     colorScheme === "dark"
       ? "rgba(255,255,255,0.07)"
       : "rgba(17,24,28,0.045)";
-  const primarySoftColor =
-    colorScheme === "dark"
-      ? "rgba(46,168,83,0.18)"
-      : "rgba(46,168,83,0.11)";
   const subtopicHeaderColor =
     colorScheme === "dark"
       ? "rgba(255,255,255,0.032)"
       : "rgba(255,255,255,0.50)";
-  const subtopicCountColor =
-    colorScheme === "dark"
-      ? "rgba(46,168,83,0.20)"
-      : "rgba(46,168,83,0.10)";
-  const [collapsedTopicGroups, setCollapsedTopicGroups] = useState<Set<string>>(
+  const defaultTopicColor = Colors.universal.primary;
+  const [expandedTopicGroups, setExpandedTopicGroups] = useState<Set<string>>(
     () => new Set(),
   );
-  const [collapsedTopicSections, setCollapsedTopicSections] = useState<Set<string>>(
+  const [expandedTopicSections, setExpandedTopicSections] = useState<Set<string>>(
     () => new Set(),
   );
   const topicTapStateRef = useRef<{
@@ -168,15 +172,27 @@ export default function VideoGridList({
       key: string,
       title: string,
       isUncategorized: boolean,
+      sortOrder: number | null,
+      colorHex: string,
     ) => {
       const existing = groupsByKey.get(key);
-      if (existing) return existing;
+      if (existing) {
+        if (existing.sortOrder === null && sortOrder !== null) {
+          existing.sortOrder = sortOrder;
+        }
+        if (existing.colorHex === defaultTopicColor && colorHex !== defaultTopicColor) {
+          existing.colorHex = colorHex;
+        }
+        return existing;
+      }
 
       const group = {
         key,
         title,
         sections: [],
         isUncategorized,
+        sortOrder,
+        colorHex,
         videoIds: new Set<number>(),
       };
       groupsByKey.set(key, group);
@@ -212,6 +228,8 @@ export default function VideoGridList({
           UNCATEGORIZED_TOPIC_KEY,
           uncategorizedTitle,
           true,
+          null,
+          defaultTopicColor,
         );
 
         addVideoToSection(
@@ -222,6 +240,8 @@ export default function VideoGridList({
             fullTitle: uncategorizedTitle,
             isUncategorized: true,
             isDirectRoot: true,
+            sortOrder: null,
+            colorHex: defaultTopicColor,
           },
           video,
         );
@@ -236,6 +256,28 @@ export default function VideoGridList({
         const fullTitle = getTopicDisplayName(topic);
         const isRootCategory = !categoryName;
         const groupTitle = categoryName || topicTitle;
+        const groupSortOrder = topicSortOrders
+          ? getTopicSortOrder(topicSortOrders.categories, groupTitle)
+          : null;
+        const groupColorHex = topicSortOrders
+          ? getTopicColor(
+              topicSortOrders.categoryColors,
+              groupTitle,
+              defaultTopicColor,
+            )
+          : defaultTopicColor;
+        const sectionSortOrder =
+          categoryName && topicSortOrders
+            ? getTopicSortOrder(topicSortOrders.subcategories, topicTitle)
+            : null;
+        const sectionColorHex =
+          categoryName && topicSortOrders
+            ? getTopicColor(
+                topicSortOrders.subcategoryColors,
+                topicTitle,
+                groupColorHex,
+              )
+            : groupColorHex;
         const groupKey = topic.category_id
           ? `category:${topic.category_id}`
           : `category:${groupTitle.toLocaleLowerCase()}`;
@@ -243,7 +285,13 @@ export default function VideoGridList({
           ? `subcategory:${topic.subcategory_id ?? fullTitle.toLocaleLowerCase()}`
           : `${groupKey}:root`;
 
-        const group = getOrCreateGroup(groupKey, groupTitle, false);
+        const group = getOrCreateGroup(
+          groupKey,
+          groupTitle,
+          false,
+          groupSortOrder,
+          groupColorHex,
+        );
         addVideoToSection(
           group,
           {
@@ -252,6 +300,8 @@ export default function VideoGridList({
             fullTitle,
             isUncategorized: false,
             isDirectRoot: isRootCategory,
+            sortOrder: sectionSortOrder,
+            colorHex: sectionColorHex,
           },
           video,
         );
@@ -266,18 +316,28 @@ export default function VideoGridList({
           return a.isDirectRoot ? -1 : 1;
         }
 
-        return a.title.localeCompare(b.title, lang, { sensitivity: "base" });
+        return compareBySortOrderThenName(
+          { name: a.title, sortOrder: a.sortOrder },
+          { name: b.title, sortOrder: b.sortOrder },
+          lang,
+        );
       }),
       isUncategorized: group.isUncategorized,
       videoCount: group.videoIds.size,
+      sortOrder: group.sortOrder,
+      colorHex: group.colorHex,
     })).sort((a, b) => {
       if (a.isUncategorized !== b.isUncategorized) {
         return a.isUncategorized ? 1 : -1;
       }
 
-      return a.title.localeCompare(b.title, lang, { sensitivity: "base" });
+      return compareBySortOrderThenName(
+        { name: a.title, sortOrder: a.sortOrder },
+        { name: b.title, sortOrder: b.sortOrder },
+        lang,
+      );
     });
-  }, [lang, uncategorizedTitle, videos]);
+  }, [defaultTopicColor, lang, topicSortOrders, uncategorizedTitle, videos]);
 
   // Stabile Card-Hoehe auf Web, damit FlatList beim Schnellscrollen
   // keine variierenden Item-Hoehen schaetzen muss (Author-Row ist konditional).
@@ -389,7 +449,7 @@ export default function VideoGridList({
   }, []);
 
   const toggleTopicGroup = useCallback((key: string) => {
-    setCollapsedTopicGroups((current) => {
+    setExpandedTopicGroups((current) => {
       const next = new Set(current);
       if (next.has(key)) {
         next.delete(key);
@@ -401,7 +461,7 @@ export default function VideoGridList({
   }, []);
 
   const toggleTopicSection = useCallback((key: string) => {
-    setCollapsedTopicSections((current) => {
+    setExpandedTopicSections((current) => {
       const next = new Set(current);
       if (next.has(key)) {
         next.delete(key);
@@ -414,7 +474,12 @@ export default function VideoGridList({
 
   const renderSectionRow = useCallback(
     (section: TopicVideoSection, hideTitle: boolean) => {
-      const isCollapsed = collapsedTopicSections.has(section.key);
+      const isCollapsed =
+        !hideTitle && !expandedTopicSections.has(section.key);
+      const accentSoftColor = hexToRgba(
+        section.colorHex,
+        colorScheme === "dark" ? 0.2 : 0.1,
+      );
 
       return (
         <View
@@ -431,7 +496,19 @@ export default function VideoGridList({
           ]}
         >
           {!hideTitle ? (
-            <View
+            <Pressable
+              accessibilityLabel={
+                isCollapsed ? `${section.title} öffnen` : `${section.title} schließen`
+              }
+              accessibilityRole="button"
+              onPress={() => {
+                toggleTopicSection(section.key);
+                handleTopicTitlePress({
+                  key: section.key,
+                  title: section.fullTitle,
+                  isUncategorized: section.isUncategorized,
+                });
+              }}
               style={[
                 styles.subtopicHeader,
                 rtl && styles.topicHeaderReverse,
@@ -441,12 +518,7 @@ export default function VideoGridList({
                 },
               ]}
             >
-              <Pressable
-                accessibilityLabel={
-                  isCollapsed ? `${section.title} öffnen` : `${section.title} schließen`
-                }
-                hitSlop={8}
-                onPress={() => toggleTopicSection(section.key)}
+              <View
                 style={[
                   styles.chevronButton,
                   {
@@ -466,48 +538,35 @@ export default function VideoGridList({
                   size={16}
                   color={colors.tabIconDefault}
                 />
-              </Pressable>
+              </View>
 
               <View
                 style={[
                   styles.subtopicMarker,
-                  { backgroundColor: Colors.universal.primary },
+                  { backgroundColor: section.colorHex },
                 ]}
               />
 
-              <Pressable
-                disabled={section.isUncategorized}
-                hitSlop={8}
-                onPress={() =>
-                  handleTopicTitlePress({
-                    key: section.key,
-                    title: section.fullTitle,
-                    isUncategorized: section.isUncategorized,
-                  })
-                }
-                style={styles.topicTitlePressable}
+              <Text
+                style={[
+                  styles.subtopicTitle,
+                  {
+                    color: colors.text,
+                    textAlign: rtl ? "right" : "left",
+                    writingDirection: rtl ? "rtl" : "ltr",
+                  },
+                ]}
+                numberOfLines={1}
               >
-                <Text
-                  style={[
-                    styles.subtopicTitle,
-                    {
-                      color: colors.text,
-                      textAlign: rtl ? "right" : "left",
-                      writingDirection: rtl ? "rtl" : "ltr",
-                    },
-                  ]}
-                  numberOfLines={1}
-                >
-                  {section.title}
-                </Text>
-              </Pressable>
+                {section.title}
+              </Text>
 
               <Text
                 style={[
                   styles.subtopicCount,
                   {
-                    backgroundColor: subtopicCountColor,
-                    color: Colors.universal.primary,
+                    backgroundColor: accentSoftColor,
+                    color: section.colorHex,
                   },
                   rtl && { textAlign: "left" },
                 ]}
@@ -515,7 +574,7 @@ export default function VideoGridList({
               >
                 {section.videos.length}
               </Text>
-            </View>
+            </Pressable>
           ) : null}
 
           {!isCollapsed ? (
@@ -540,16 +599,16 @@ export default function VideoGridList({
       );
     },
     [
-      collapsedTopicSections,
       categoryBorderColor,
+      colorScheme,
       controlSurfaceColor,
       colors.tabIconDefault,
       colors.text,
+      expandedTopicSections,
       getTopicItemLayout,
       handleTopicTitlePress,
       renderVideo,
       rtl,
-      subtopicCountColor,
       subtopicHeaderColor,
       toggleTopicSection,
     ],
@@ -557,7 +616,8 @@ export default function VideoGridList({
 
   const renderGroup = useCallback(
     ({ item: group }: ListRenderItemInfo<TopicVideoGroup>) => {
-      const isGroupCollapsed = collapsedTopicGroups.has(group.key);
+      const isGroupCollapsed =
+        !group.isUncategorized && !expandedTopicGroups.has(group.key);
       const directRootSections = group.sections.filter(
         (section) => section.isDirectRoot,
       );
@@ -566,10 +626,27 @@ export default function VideoGridList({
       );
       const hasSubtopicRows = subtopicSections.length > 0;
       const hasMixedRows = directRootSections.length > 0 && hasSubtopicRows;
+      const topicAccentSoftColor = hexToRgba(
+        group.colorHex,
+        colorScheme === "dark" ? 0.18 : 0.11,
+      );
 
       return (
         <View style={[styles.topicGroup, IS_WEB && styles.webTopicGroup]}>
-          <View
+          <Pressable
+            accessibilityLabel={
+              isGroupCollapsed ? `${group.title} öffnen` : `${group.title} schließen`
+            }
+            accessibilityRole="button"
+            disabled={group.isUncategorized}
+            onPress={() => {
+              toggleTopicGroup(group.key);
+              handleTopicTitlePress({
+                key: group.key,
+                title: group.title,
+                isUncategorized: group.isUncategorized,
+              });
+            }}
             style={[
               styles.topicHeader,
               IS_WEB && styles.webTopicHeader,
@@ -590,18 +667,12 @@ export default function VideoGridList({
                 <View
                   style={[
                     styles.webTopicAccent,
-                    { backgroundColor: Colors.universal.primary },
+                    { backgroundColor: group.colorHex },
                   ]}
                 />
               )}
 
-              <Pressable
-                accessibilityLabel={
-                  isGroupCollapsed ? `${group.title} öffnen` : `${group.title} schließen`
-                }
-                disabled={group.isUncategorized}
-                hitSlop={8}
-                onPress={() => toggleTopicGroup(group.key)}
+              <View
                 style={[
                   styles.chevronButton,
                   {
@@ -621,49 +692,36 @@ export default function VideoGridList({
                   size={18}
                   color={colors.tabIconDefault}
                 />
-              </Pressable>
+              </View>
 
               <View
                 style={[
                   styles.topicIconTile,
                   IS_WEB && styles.webTopicIconTile,
-                  { backgroundColor: primarySoftColor },
+                  { backgroundColor: topicAccentSoftColor },
                 ]}
               >
                 <Ionicons
                   name={hasSubtopicRows ? "folder-open-outline" : "albums-outline"}
                   size={IS_WEB ? 14 : 15}
-                  color={Colors.universal.primary}
+                  color={group.colorHex}
                 />
               </View>
 
-              <Pressable
-                disabled={group.isUncategorized}
-                hitSlop={8}
-                onPress={() =>
-                  handleTopicTitlePress({
-                    key: group.key,
-                    title: group.title,
-                    isUncategorized: group.isUncategorized,
-                  })
-                }
-                style={styles.topicTitlePressable}
+              <Text
+                style={[
+                  styles.topicTitle,
+                  IS_WEB && styles.webTopicTitle,
+                  {
+                    color: colors.text,
+                    textAlign: rtl ? "right" : "left",
+                    writingDirection: rtl ? "rtl" : "ltr",
+                  },
+                ]}
+                numberOfLines={1}
               >
-                <Text
-                  style={[
-                    styles.topicTitle,
-                    IS_WEB && styles.webTopicTitle,
-                    {
-                      color: colors.text,
-                      textAlign: rtl ? "right" : "left",
-                      writingDirection: rtl ? "rtl" : "ltr",
-                    },
-                  ]}
-                  numberOfLines={1}
-                >
-                  {group.title}
-                </Text>
-              </Pressable>
+                {group.title}
+              </Text>
             </View>
 
             <Text
@@ -673,9 +731,7 @@ export default function VideoGridList({
                   backgroundColor:
                     colorScheme === "dark" ? controlSurfaceColor : colors.contrast,
                   color:
-                    colorScheme === "dark"
-                      ? colors.text
-                      : Colors.universal.primary,
+                    group.colorHex,
                 },
                 !IS_WEB && { textAlign: rtl ? "left" : "right" },
               ]}
@@ -683,7 +739,7 @@ export default function VideoGridList({
             >
               {group.videoCount}
             </Text>
-          </View>
+          </Pressable>
 
           {!isGroupCollapsed ? (
             <View style={hasSubtopicRows && styles.subtopicList}>
@@ -700,7 +756,6 @@ export default function VideoGridList({
       );
     },
     [
-      collapsedTopicGroups,
       categoryBorderColor,
       categoryHeaderColor,
       colorScheme,
@@ -708,7 +763,7 @@ export default function VideoGridList({
       colors.tabIconDefault,
       colors.text,
       controlSurfaceColor,
-      primarySoftColor,
+      expandedTopicGroups,
       rtl,
       handleTopicTitlePress,
       renderSectionRow,

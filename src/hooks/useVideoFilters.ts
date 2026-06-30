@@ -3,10 +3,14 @@ import { useQuery } from "@tanstack/react-query";
 
 import { supabase } from "../../utils/supabase";
 import {
+  compareTopicLabelsByOrder,
+  EMPTY_TOPIC_SORT_ORDERS,
   getVideoTopicNames,
   normalizeVideoRows,
+  type TopicSortOrders,
   VIDEO_WITH_TOPICS_SELECT,
 } from "../../utils/videoTopics";
+import { useTopicSortOrders } from "./useTopicSortOrders";
 
 type UseVideoFiltersArgs = {
   language: string | null;
@@ -47,11 +51,25 @@ function uniqueSorted(values: (string | null)[]) {
   ].sort();
 }
 
+function uniqueTopicsSorted(
+  values: (string | null)[],
+  topicSortOrders: TopicSortOrders,
+) {
+  return [
+    ...new Set(values.filter((value): value is string => Boolean(value))),
+  ].sort((a, b) =>
+    compareTopicLabelsByOrder(a, b, topicSortOrders, "de"),
+  );
+}
+
 export function useVideoFilters({
   language,
   selectedTopic,
   selectedAuthor,
 }: UseVideoFiltersArgs) {
+  const topicSortOrdersQuery = useTopicSortOrders();
+  const topicSortOrders =
+    topicSortOrdersQuery.topicSortOrders ?? EMPTY_TOPIC_SORT_ORDERS;
   const query = useQuery<FilterPair[]>({
     queryKey: ["video_filter_pairs"],
     queryFn: fetchFilterPairs,
@@ -63,8 +81,8 @@ export function useVideoFilters({
   const pairs = query.data ?? EMPTY_FILTER_PAIRS;
 
   const allTopics = useMemo(
-    () => uniqueSorted(pairs.map((pair) => pair.topic)),
-    [pairs],
+    () => uniqueTopicsSorted(pairs.map((pair) => pair.topic), topicSortOrders),
+    [pairs, topicSortOrders],
   );
   const allAuthors = useMemo(
     () => uniqueSorted(pairs.map((pair) => pair.author)),
@@ -76,7 +94,7 @@ export function useVideoFilters({
   );
 
   const availableTopics = useMemo(() => {
-    return uniqueSorted(
+    return uniqueTopicsSorted(
       pairs
         .filter(
           (pair) =>
@@ -84,8 +102,9 @@ export function useVideoFilters({
             (!selectedAuthor || pair.author === selectedAuthor),
         )
         .map((pair) => pair.topic),
+      topicSortOrders,
     );
-  }, [language, pairs, selectedAuthor]);
+  }, [language, pairs, selectedAuthor, topicSortOrders]);
 
   const availableAuthors = useMemo(() => {
     return uniqueSorted(
@@ -119,5 +138,6 @@ export function useVideoFilters({
     availableTopics,
     availableAuthors,
     availableLanguages,
+    topicSortOrders,
   };
 }

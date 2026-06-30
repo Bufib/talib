@@ -88,6 +88,7 @@ export default function HomeScreen() {
     refetch: videosRefetch,
     isRefetching: videosIsRefetching,
     isFetching: videosIsFetching,
+    topicSortOrders,
   } = useVideoList({
     language: selectedVideoLanguage,
     selectedTopic,
@@ -512,6 +513,7 @@ export default function HomeScreen() {
             ListHeaderComponent={renderHeader()}
             ListEmptyComponent={renderEmpty}
             refreshing={isManualRefreshing}
+            topicSortOrders={topicSortOrders}
             onRefresh={() => {
               setIsManualRefreshing(true);
               videosRefetch();
